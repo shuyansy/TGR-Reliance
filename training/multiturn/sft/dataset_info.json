@@ -1,0 +1,14 @@
+{
+  "evice_multiturn_qwen25": {
+    "file_name": "evice_multiturn_qwen25.json",
+    "formatting": "sharegpt",
+    "columns": {"messages": "messages", "videos": "videos", "system": "system", "id": "id"},
+    "tags": {"role_tag": "role", "content_tag": "content", "user_tag": "user", "assistant_tag": "assistant"}
+  },
+  "evice_multiturn_qwen3": {
+    "file_name": "evice_multiturn_qwen3.json",
+    "formatting": "sharegpt",
+    "columns": {"messages": "messages", "videos": "videos", "system": "system", "id": "id"},
+    "tags": {"role_tag": "role", "content_tag": "content", "user_tag": "user", "assistant_tag": "assistant"}
+  }
+}

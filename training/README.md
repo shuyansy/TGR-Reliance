@@ -45,4 +45,6 @@ FSDP2, vLLM rollout; we trained 323 steps on 2 nodes x 8 GPUs.
 
 ## 3. Multi-turn format
 
-Coming soon (based on [Video-o3](https://github.com/MCG-NJU/Video-o3)).
+The model crops the video with a tool call and answers after viewing the crop. Code, data conversion and launch scripts are in
+[`multiturn/`](multiturn/README.md), as patches to the official [Video-o3](https://github.com/MCG-NJU/Video-o3) code
+(Qwen2.5-VL-7B and Qwen3-VL-8B); the recipe is the same: SFT on EviCe, then GRPO with `R_IoU`.

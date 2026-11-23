@@ -1,0 +1,17 @@
+Backport of the upstream fix (as in transformers 4.57): group videos by (frames, height, width) instead of (height, width).
+transformers 4.52.0 (the version used by Video-o3) stacks videos of the same size but different frame counts (overview + crops of
+short, low-resolution videos) and fails with "stack expects each tensor to be equal size".
+Apply inside the environment of the Video-o3 RL code:  patch -p1 -d $(python -c "import transformers, os; print(os.path.dirname(transformers.__file__))") < transformers_4.52_video_utils.patch
+--- a/video_utils.py
++++ b/video_utils.py
+@@ -696,6 +696,10 @@
+     grouped_videos_index = {}
+     for i, video in enumerate(videos):
+         shape = video.shape[-2::]
++        # [vo3-repro] backport of the upstream fix: also group by the number of frames, otherwise videos with the same
++        # height and width but different lengths are stacked together
++        num_frames = video.shape[-4]  # video format BTCHW
++        shape = (num_frames, *shape)
+         if shape not in grouped_videos:
+             grouped_videos[shape] = []
+         grouped_videos[shape].append(video)

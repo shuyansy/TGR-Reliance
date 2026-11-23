@@ -1,0 +1,52 @@
+# Multi-turn SFT (Video-o3 tool format) of Qwen3-VL-8B-Instruct with the SFT code of Video-o3 (qwen3vl branch @ 9f1df68, patched with
+# patches/video_o3_qwen3.patch). Data: tools/build_sft_data.py --family qwen3. Run with VO3_Q3_GRID_FRAMES=1 (see run_sft.sh): videos are
+# then sampled and resized with exactly the rules of the RL engine (4 fps frame grid, overview 2 fps <= 768 frames and <= 16,384 tokens,
+# crops 2,048 / 4,096 / 6,144 tokens, absolute timestamps), so the video_* / *_token_number values below are not used.
+### model
+model_name_or_path: Qwen/Qwen3-VL-8B-Instruct
+image_max_pixels: 262144
+video_max_pixels: 602112
+video_min_pixels: 100352
+video_fps: 2.0
+video_maxlen: 768
+min_token_number: 512
+max_token_number: 16384
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: full
+freeze_vision_tower: true
+freeze_multi_modal_projector: false   # Qwen3-VL: train the merger
+freeze_language_model: false
+deepspeed: examples/deepspeed/ds_z3_config.json   # relative to Video-o3/SFT
+
+### dataset
+dataset: evice_multiturn_qwen3
+dataset_dir: data                 # holds dataset_info.json and evice_multiturn_qwen3.json
+template: qwen3_vl_nothink        # every assistant turn already contains <think>...</think>; same tokens as the qwen3_vl template
+cutoff_len: 45056                 # 40,000 + the timestamp text of Qwen3-VL
+overwrite_cache: true
+preprocessing_num_workers: 16
+dataloader_num_workers: 4
+
+### output
+output_dir: saves/qwen3vl_8b_multiturn_sft
+logging_steps: 10
+save_strategy: epoch
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: true
+report_to: none
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 1    # we trained on 16 GPUs (global batch 16); use 2 on 8 GPUs
+learning_rate: 1.0e-5
+num_train_epochs: 1.0
+max_steps: 292                    # we used 4,800 questions (build_sft_data.py --n 4800)
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+bf16: true
+ddp_timeout: 180000000

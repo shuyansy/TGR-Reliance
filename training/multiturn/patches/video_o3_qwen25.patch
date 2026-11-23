@@ -1,0 +1,1256 @@
+diff --git a/RL/verl/trainer/ppo/ray_trainer.py b/RL/verl/trainer/ppo/ray_trainer.py
+index 1d98ed6..dbcf4e1 100755
+--- a/RL/verl/trainer/ppo/ray_trainer.py
++++ b/RL/verl/trainer/ppo/ray_trainer.py
+@@ -30,6 +30,7 @@ from copy import deepcopy
+ import json
+ 
+ import numpy as np
++from tensordict import TensorDict
+ from codetiming import Timer
+ from omegaconf import OmegaConf, open_dict
+ from verl import DataProto
+@@ -112,6 +113,106 @@ import torch
+ from verl.utils.torch_functional import masked_mean
+ 
+ 
++def vo3_expand_rounds(batch: DataProto, pad_id: int, world_size: int, ignore_exceed: bool, ignore_void: bool):
++    """[vo3-repro 2026-10-20] Context variants (VO3_CTX=A/B/D/CS): trajectory batch (group filtering / truncation / advantages computed on the original cumulative sequence) -> batch of per-round training rows.
++    One row per round of every trajectory: input = the context actually used for that round's generation + that round's response; the loss covers only the response tokens that the original (C) also trains (the engine takes them by position from C's attention x multi-turn mask,
++    and here we check that the training tokens of the rows add up to those of the trajectory in C). Advantage = the GRPO advantage of the whole trajectory (normalised within the group of 16, as in C).
++    Row coefficient = training tokens of the row / training tokens of the trajectory x world_size / number of trajectories: dp_actor multiplies each row's token-mean loss by it and updates once with all rows, which equals
++    the original "token mean per trajectory, equal trajectory weights, divided by the number of trajectories" (world_size cancels the FSDP gradient averaging across ranks).
++    Ordering: the vision-tower blocks are FSDP-wrapped separately, so within a micro-batch all ranks must either all run the vision tower or all skip it -> rows without video (A/D when all earlier crops failed) go first on every rank, with the same count per rank;
++    both groups are padded with zero-coefficient dummy rows to a multiple of world_size and balanced across ranks by token count. Row width = longest context + longest response of this batch (instead of C's 18432 + 32768).
++    Returns (row batch DataProto, statistics dict)"""
++    b, nt = batch.batch, batch.non_tensor_batch
++    T = len(batch)
++    L = b['responses'].size(1)
++    c_mask = (b['attention_mask'] * b['multi_turn_response_mask'])[:, -L:]
++    adv = b['advantages']
++    st = {k: 0 for k in ['traj_used', 'traj_mismatch', 'traj_exceed_skipped', 'traj_void_skipped', 'traj_no_loss', 'rows_no_loss',
++                         'loss_tokens_c', 'loss_tokens_rows', 'traj_tokens_c']}
++    items, bad_detail = [], []
++    for t in range(T):
++        rt = nt['vo3_rows'][t]
++        if ignore_exceed and bool(b['exceed_mask'][t]):
++            st['traj_exceed_skipped'] += 1
++            continue
++        if ignore_void and bool(b['void_mask'][t]):
++            st['traj_void_skipped'] += 1
++            continue
++        n_c = int(c_mask[t].sum())
++        if n_c == 0:
++            st['traj_no_loss'] += 1
++            continue
++        n_rows = sum(int(r['lm'].sum()) for r in rt) if isinstance(rt, list) else -1
++        if n_rows != n_c:
++            st['traj_mismatch'] += 1
++            bad_detail.append((str(nt['uid'][t]), n_c, n_rows))
++            continue
++        A = adv[t][c_mask[t] > 0]
++        st['traj_used'] += 1
++        st['loss_tokens_c'] += n_c
++        st['traj_tokens_c'] += int(b['attention_mask'][t].sum())
++        for r in rt:
++            n_r = int(r['lm'].sum())
++            if n_r == 0:
++                st['rows_no_loss'] += 1
++                continue
++            st['loss_tokens_rows'] += n_r
++            items.append({'r': r, 'coef': n_r / n_c * world_size / T, 'A': float(A[0]), 'dummy': False})
++    if bad_detail:
++        print(f"[vo3-rows-mismatch] {len(bad_detail)} trajectories: the rows' training tokens do not add up to C's; these trajectories are not trained in this step (uid, C, rows): {bad_detail[:20]}", flush=True)
++    assert items, "no trainable rows in this step"
++
++    def _group(g):
++        if not g:
++            return [[] for _ in range(world_size)]
++        short = min(g, key=lambda x: len(x['r']['ids']))
++        g = g + [{'r': short['r'], 'coef': 0.0, 'A': 0.0, 'dummy': True} for _ in range((-len(g)) % world_size)]
++        parts = get_seqlen_balanced_partitions([len(x['r']['ids']) for x in g], k_partitions=world_size, equal_size=True)
++        return [[g[i] for i in part] for part in parts]
++
++    text_parts = _group([x for x in items if not x['r']['videos']])
++    vid_parts = _group([x for x in items if x['r']['videos']])
++    out = [x for rk in range(world_size) for x in text_parts[rk] + vid_parts[rk]]
++    P_row = max(x['r']['n_ctx'] for x in out)
++    L_row = max(len(x['r']['ids']) - x['r']['n_ctx'] for x in out)
++    N, W = len(out), P_row + L_row
++    input_ids = torch.full((N, W), pad_id, dtype=torch.long)
++    attn = torch.zeros((N, W), dtype=torch.long)
++    pos = torch.ones((N, 3, W), dtype=torch.long)
++    mt = torch.zeros((N, W), dtype=torch.long)
++    advs = torch.zeros((N, L_row), dtype=torch.float32)
++    coef = torch.zeros(N, dtype=torch.float32)
++    mm = np.empty(N, dtype=object)
++    for i, x in enumerate(out):
++        r = x['r']
++        nc = r['n_ctx']
++        ids = r['ids'].long()
++        nr = ids.shape[0] - nc
++        input_ids[i, P_row - nc:P_row + nr] = ids
++        attn[i, P_row - nc:P_row + nr] = 1
++        pos[i, :, P_row - nc:P_row + nr] = r['pos'].long()
++        if not x['dummy']:
++            mt[i, P_row:P_row + nr] = r['lm'].long()
++            advs[i, :nr] = x['A']
++            coef[i] = x['coef']
++        mm[i] = {'video': list(r['videos'])} if r['videos'] else None
++    td = {'prompts': input_ids[:, :P_row].contiguous(), 'responses': input_ids[:, P_row:].contiguous(), 'input_ids': input_ids,
++          'attention_mask': attn, 'position_ids': pos, 'multi_turn_response_mask': mt, 'advantages': advs,
++          'exceed_mask': torch.zeros(N, dtype=torch.bool), 'void_mask': torch.zeros(N, dtype=torch.bool), 'vo3_row_coef': coef}
++    rows = DataProto(batch=TensorDict(td, batch_size=N), non_tensor_batch={'multi_modal_data': mm},
++                     meta_info={'global_token_num': attn.sum(-1).tolist()})
++    real = [x for x in out if not x['dummy']]
++    n_text = sum(1 for x in real if not x['r']['videos'])
++    ctx = [x['r']['n_ctx'] for x in real]
++    metrics = {f'vo3_rows/{k}': v for k, v in st.items()}
++    metrics.update({'vo3_rows/rows': len(real), 'vo3_rows/rows_text_only': n_text, 'vo3_rows/rows_dummy': N - len(real),
++                    'vo3_rows/rows_per_traj': len(real) / max(st['traj_used'], 1), 'vo3_rows/ctx_len_mean': float(np.mean(ctx)),
++                    'vo3_rows/ctx_len_max': int(max(ctx)), 'vo3_rows/row_tokens': int(attn.sum()),
++                    'vo3_rows/row_tokens_over_traj_tokens': int(attn.sum()) / max(st['traj_tokens_c'], 1),
++                    'vo3_rows/coef_sum': float(coef.sum()), 'vo3_rows/width': W})
++    return rows, metrics
++
++
+ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, kl_penalty='kl'):
+     responses = data.batch['responses']
+     response_length = responses.size(1)
+@@ -604,7 +705,9 @@ class RayPPOTrainer(object):
+         self.train_dataloader = StatefulDataLoader(dataset=self.train_dataset,
+                                                    batch_size=train_batch_size,
+                                                    num_workers=self.num_workers,
+-                                                   prefetch_factor=4,
++                                                   # [vo3-repro 2026-10-20] official value 4: 4 workers prefetch 16 batches x 32 questions of float32 overviews (~271 MB per question) = ~139 GB resident;
++                                                   # VO3_PREFETCH_FACTOR can lower it (only the fetching pace changes, not the question order; a state saved with 4 resumes in the same order with 1, checked on CPU)
++                                                   prefetch_factor=int(os.environ.get('VO3_PREFETCH_FACTOR', '4')),
+                                                    drop_last=True,
+                                                    collate_fn=collate_fn,
+                                                    persistent_workers=True,
+@@ -676,10 +779,7 @@ class RayPPOTrainer(object):
+             # ) == 1, "Validation dataloader must have a single batch, which inference engines will schedule the memory themselves."
+ 
+         # inject total_training_steps to actor/critic optim_config. This is hacky.
+-        total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
+-
+-        if self.config.trainer.total_training_steps is not None:
+-            total_training_steps = self.config.trainer.total_training_steps
++        total_training_steps = self._vo3_total_training_steps()   # [vo3-repro 2026-10-19] default +1, see that function
+ 
+         self.total_training_steps = total_training_steps
+         print(f'Total training steps: {self.total_training_steps}')
+@@ -1116,26 +1216,180 @@ class RayPPOTrainer(object):
+         print("init 1111111 ")
+ 
+ 
+-    def _save_checkpoint(self):
++    def _vo3_mem_metrics(self):
++        # [vo3-repro 2026-10-20] host memory at every step: cgroup usage / limit of this pod (GB), resident memory of this process (main_task), available memory of the machine; unreadable items are skipped
++        out = {}
++        try:
++            for name, path in (('cgroup_used_gb', '/sys/fs/cgroup/memory.current'), ('cgroup_limit_gb', '/sys/fs/cgroup/memory.max'),
++                               ('cgroup_used_gb', '/sys/fs/cgroup/memory/memory.usage_in_bytes'), ('cgroup_limit_gb', '/sys/fs/cgroup/memory/memory.limit_in_bytes')):
++                if name not in out and os.path.exists(path):
++                    v = open(path).read().strip()
++                    if v.isdigit() and int(v) < (1 << 60):
++                        out[name] = int(v) / 2**30
++            import psutil
++            out['main_task_rss_gb'] = psutil.Process().memory_info().rss / 2**30
++            vm = psutil.virtual_memory()
++            out['host_avail_gb'], out['host_total_gb'] = vm.available / 2**30, vm.total / 2**30
++        except Exception:
++            import traceback
++            print('[vo3-repro] cannot read memory (training unaffected):\n' + traceback.format_exc(), flush=True)
++        return {f'vo3/mem_{k}': round(v, 2) for k, v in out.items()}
++
++    def _vo3_total_training_steps(self):
++        # [vo3-repro 2026-10-19] use trainer.total_training_steps if set; otherwise the official default is batches x epochs, but the training loop stops when the counter reaches T after the (T-1)-th update,
++        # so when every batch yields an update (all groups pass the filter) the last batch is never read (second review: 36 of 40 questions generated).
++        # Use batches x epochs + 1: at most one update per batch and all batches read; with heavy filtering training still ends when the data runs out
++        if self.config.trainer.total_training_steps is not None:
++            return self.config.trainer.total_training_steps
++        return len(self.train_dataloader) * self.config.trainer.total_epochs + 1
++
++    def _vo3_tracker(self):
++        # [vo3-repro 2026-10-19] step recorded in the progress file (None if absent)
++        p = os.path.join(self.config.trainer.default_local_dir, 'latest_checkpointed_iteration.txt')
++        try:
++            return int(open(p).read().strip())
++        except Exception:
++            return None
++
++    def _vo3_resume_done_reason(self):
++        # [vo3-repro 2026-10-19] whether the restored checkpoint (self.global_steps = completed updates) already finished training: returns the reason, else None
++        import json
++        if self.global_steps <= 0:
++            return None
++        if self.global_steps >= self.total_training_steps - 1:   # official loop: stops when the counter reaches T after the (T-1)-th update
++            return 'total_training_steps'
++        p = os.path.join(self.config.trainer.default_local_dir, 'DATA_EXHAUSTED.json')
++        if os.path.exists(p):
++            try:
++                if json.load(open(p)).get('updates') == self.global_steps:
++                    return 'data_exhausted'
++            except Exception:
++                import traceback
++                print('[vo3-repro] cannot read DATA_EXHAUSTED.json:\n' + traceback.format_exc(), flush=True)
++        return None
++
++    def _vo3_finish(self, reason, logger):
++        # [vo3-repro 2026-10-19] shared by both endings (steps exhausted / data exhausted) and by "already finished after restore": final validation -> last checkpoint -> TRAINING_DONE.json
++        # checkpoint step = completed updates (self.global_steps - 1); not saved again if this step is already in the progress file.
++        # The original named the last checkpoint by global_steps (= updates + 1), so resuming from it skipped a step number (found in the 10-19 review)
++        updates = self.global_steps - 1
++        val_metrics = None
++        if self.val_reward_fn is not None:
++            val_metrics = self._validate()
++            pprint(f'Final validation metrics: {val_metrics}')
++            logger.log(data=val_metrics, step=self.global_steps)
++        if self.config.trainer.save_freq > 0 and updates > 0 and self._vo3_tracker() != updates:
++            self._save_checkpoint(step=updates)
++        self._vo3_mark_done(reason, val_metrics)
++
++    def _vo3_dump_used(self, batch, num_gen_batches):
++        # [vo3-repro 2026-10-19] trajectories that actually entered this update (after dynamic-sampling accumulation, truncation to train_batch_size questions and advantage computation): rollouts/step_XXXXX.used.json
++        # (passed_filter in the trajectory jsonl only means the group passed the reward-variance filter; groups beyond the batch are cut). Per trajectory: group uid / index in group / forced call in smoke tests /
++        # successful crops / video segments / over length / no answer (void) / number of trained tokens (as in dp_actor: response part of attention_mask x multi_turn_response_mask,
++        # zeroed for the whole trajectory when ignore_exceed / ignore_void apply) / mean |advantage| over these tokens. When a step is redone after resuming, the last write wins (file overwritten)
++        import json
++        out_dir = os.environ.get('VO3_DUMP_ROLLOUTS_DIR')
++        if not out_dir:
++            return
++        try:
++            os.makedirs(out_dir, exist_ok=True)
++            b, nt = batch.batch, batch.non_tensor_batch
++            L = b['responses'].size(1)
++            mask = (b['attention_mask'] * b['multi_turn_response_mask'])[:, -L:].float() if 'multi_turn_response_mask' in b.keys() else b['attention_mask'][:, -L:].float()
++            acfg = self.config.actor_rollout_ref.actor
++            if acfg.get('ignore_exceed', False) and 'exceed_mask' in b.keys():
++                mask[b['exceed_mask'].bool()] = 0
++            if acfg.get('ignore_void', False) and 'void_mask' in b.keys():
++                mask[b['void_mask'].bool()] = 0
++            ntok = mask.sum(-1)
++            adv = (b['advantages'].abs() * mask).sum(-1) / ntok.clamp(min=1) if 'advantages' in b.keys() else torch.zeros_like(ntok)
++            traj = []
++            for i in range(len(batch)):
++                tl = nt['vo3_tool'][i] if 'vo3_tool' in nt and isinstance(nt['vo3_tool'][i], dict) else {}
++                mm = nt['multi_modal_data'][i] if 'multi_modal_data' in nt else None
++                traj.append({'uid': str(nt['uid'][i]), 'off': tl.get('off'), 'forced': int(tl.get('forced', 0)), 'forced_bad': int(tl.get('forced_bad', 0)), 'ok': int(tl.get('ok', 0)),
++                             'n_videos': len(mm.get('video', [])) if isinstance(mm, dict) else None,
++                             'exceed': bool(b['exceed_mask'][i]) if 'exceed_mask' in b.keys() else None,
++                             'void': bool(b['void_mask'][i]) if 'void_mask' in b.keys() else None,
++                             'loss_tokens': int(ntok[i]), 'adv_abs': round(float(adv[i]), 6)})
++                if 'vo3_rows' in nt:   # [vo3-repro 2026-10-20] context variants: one row per round [round, context length, trained tokens, video segments]
++                    rt = nt['vo3_rows'][i]
++                    traj[-1]['rows'] = [[int(r['k']), int(r['n_ctx']), int(r['lm'].sum()), len(r['videos'])] for r in rt] if isinstance(rt, list) else None
++            uids = list(dict.fromkeys(t['uid'] for t in traj))
++            with open(os.path.join(out_dir, f'step_{self.global_steps:05d}.used.json'), 'w') as f:
++                json.dump({'run_id': getattr(self, '_vo3_run_id', 'na'), 'step': self.global_steps, 'gen_batches': num_gen_batches,
++                           'n_traj': len(batch), 'used_uids': uids, 'traj': traj}, f)
++        except Exception:
++            import traceback
++            print('[vo3-repro] trajectory dump failed (training unaffected):\n' + traceback.format_exc(), flush=True)
++
++    def _vo3_mark_done(self, reason, val_metrics):
++        # [vo3-repro 2026-10-19] TRAINING_DONE.json is written after the final validation and the last checkpoint (the launch script uses it to detect completion and merge the last checkpoint)
++        import json
++        tracker = os.path.join(self.config.trainer.default_local_dir, 'latest_checkpointed_iteration.txt')
++        final = int(open(tracker).read().strip()) if os.path.exists(tracker) else None
++        info = {'reason': reason, 'updates': self.global_steps - 1, 'final_ckpt_step': final,
++                'final_val': {k: float(v) for k, v in (val_metrics or {}).items() if isinstance(v, (int, float))},
++                'time': time.strftime('%Y-%m-%d %H:%M:%S')}
++        with open(os.path.join(self.config.trainer.default_local_dir, 'TRAINING_DONE.json'), 'w') as f:
++            json.dump(info, f, indent=1)
++        print(f'[vo3-repro] training finished ({reason}): {self.global_steps - 1} updates, last checkpoint global_step_{final}', flush=True)
++
++    def _vo3_dump_rollouts(self, new_batch, reward_tensor, valid_mask, num_gen_batches):
++        # [vo3-repro 2026-10-19] all trajectories of every generation batch (before dynamic-sampling filtering) are appended to $VO3_DUMP_ROLLOUTS_DIR/step_XXXXX.jsonl:
++        # per trajectory: run_id of this fit call / generation-batch index gen_seq in this call (step numbers repeat after resuming; a batch is identified by (run_id, gen_seq)) / question id / group uid / score / correctness score / format score / rounds / over length / whether the group passed the reward-variance filter (passed_filter; groups actually used: see
++        # step_XXXXX.used.json) / tool-call statistics (engine patch vo3_tool) / raw output of every round. Not written unless the variable is set;
++        # errors only print the full traceback and do not affect training
++        out_dir = os.environ.get('VO3_DUMP_ROLLOUTS_DIR')
++        if not out_dir:
++            return
++        try:
++            import json
++            os.makedirs(out_dir, exist_ok=True)
++            ids = new_batch.batch['input_ids']
++            masks = new_batch.batch['multi_turn_response_mask']
++            nt = new_batch.non_tensor_batch
++            scores = reward_tensor.sum(-1).tolist()
++            exceed = new_batch.batch['exceed_mask'].tolist()
++            self._vo3_gen_seq = getattr(self, '_vo3_gen_seq', 0) + 1
++            run_id = getattr(self, '_vo3_run_id', 'na')
++            with open(os.path.join(out_dir, f'step_{self.global_steps:05d}.jsonl'), 'a', encoding='utf-8') as f:
++                for i in range(ids.shape[0]):
++                    m = masks[i]
++                    starts = torch.where(torch.diff(m, prepend=m.new_zeros(1)) == 1)[0].tolist()
++                    ends = torch.where(torch.diff(torch.cat([m, m.new_zeros(1)])) == -1)[0].tolist()
++                    turns = self.tokenizer.batch_decode([ids[i, s:e + 1].tolist() for s, e in zip(starts, ends)], skip_special_tokens=True)
++                    f.write(json.dumps({'run_id': run_id, 'gen_seq': self._vo3_gen_seq, 'step': self.global_steps, 'gen_batch': num_gen_batches,
++                                        'doc_id': str(nt['doc_id'][i]), 'uid': str(nt['uid'][i]),
++                                        'score': float(scores[i]), 'acc': float(nt['acc_scores'][i]), 'format': float(nt['format_scores'][i]),
++                                        'rounds': int(nt['rounds_nums'][i]), 'exceed': bool(exceed[i]), 'passed_filter': bool(valid_mask[i]),
++                                        'tool': nt['vo3_tool'][i] if 'vo3_tool' in nt else None, 'turns': turns}, ensure_ascii=False) + '\n')
++        except Exception:
++            import traceback
++            print('[vo3-repro] trajectory dump failed (training unaffected):\n' + traceback.format_exc(), flush=True)
++
++    def _save_checkpoint(self, step=None):
+         # path: given_path + `/global_step_{global_steps}` + `/actor`
++        # [vo3-repro 2026-10-19] step = checkpoint step (default self.global_steps); at the end _vo3_finish passes "completed updates"
++        step = self.global_steps if step is None else step
+         local_global_step_folder = os.path.join(self.config.trainer.default_local_dir,
+-                                                f'global_step_{self.global_steps}')
++                                                f'global_step_{step}')
+         actor_local_path = os.path.join(local_global_step_folder, 'actor')
+ 
+         actor_remote_path = None if self.config.trainer.default_hdfs_dir is None else os.path.join(
+-            self.config.trainer.default_hdfs_dir, f'global_step_{self.global_steps}', 'actor')
++            self.config.trainer.default_hdfs_dir, f'global_step_{step}', 'actor')
+         self.actor_rollout_wg.save_checkpoint(actor_local_path,
+                                               actor_remote_path,
+-                                              self.global_steps,
++                                              step,
+                                               remove_previous_ckpt=self.config.trainer.remove_previous_ckpt_in_save)
+ 
+         if self.use_critic:
+             critic_local_path = os.path.join(local_global_step_folder, 'critic')
+             critic_remote_path = None if self.config.trainer.default_hdfs_dir is None else os.path.join(
+-                self.config.trainer.default_hdfs_dir, f'global_step_{self.global_steps}', 'critic')
++                self.config.trainer.default_hdfs_dir, f'global_step_{step}', 'critic')
+             self.critic_wg.save_checkpoint(critic_local_path,
+                                            critic_remote_path,
+-                                           self.global_steps,
++                                           step,
+                                            remove_previous_ckpt=self.config.trainer.remove_previous_ckpt_in_save)
+ 
+         # save dataloader
+@@ -1147,7 +1401,17 @@ class RayPPOTrainer(object):
+         local_latest_checkpointed_iteration = os.path.join(self.config.trainer.default_local_dir,
+                                                            'latest_checkpointed_iteration.txt')
+         with open(local_latest_checkpointed_iteration, 'w') as f:
+-            f.write(str(self.global_steps))
++            f.write(str(step))
++        # [vo3-repro 2026-10-19] older checkpoints are removed only after the new checkpoint and the progress file are written; keep the last KEEP_CKPTS (default 2).
++        # The original remove_previous_ckpt_in_save deletes the previous checkpoint *before* writing the new one: an interruption mid-write leaves no usable checkpoint -> keep it off and use this instead
++        import glob, re, shutil
++        keep = int(os.environ.get('KEEP_CKPTS', '2'))
++        if keep > 0:
++            steps = sorted(int(re.findall(r'global_step_(\d+)$', d)[0]) for d in glob.glob(os.path.join(self.config.trainer.default_local_dir, 'global_step_*')) if re.search(r'global_step_\d+$', d))
++            for st in steps[:-keep]:
++                if st < step:
++                    shutil.rmtree(os.path.join(self.config.trainer.default_local_dir, f'global_step_{st}'), ignore_errors=True)
++                    print(f'[vo3-repro] removing old checkpoint global_step_{st} (keeping the last {keep})', flush=True)
+ 
+     def _load_checkpoint(self):
+         if self.config.trainer.resume_mode == 'disable':
+@@ -1360,10 +1624,24 @@ class RayPPOTrainer(object):
+                           config=OmegaConf.to_container(self.config, resolve=True))
+ 
+         self.global_steps = 0
++        # [vo3-repro 2026-10-19] id of this fit call + generation-batch index within it: resuming / retrying reuses step and gen_batch numbers and appends trajectories to the same file,
++        # without them exposure statistics are undercounted (second review)
++        self._vo3_run_id = time.strftime('%m%d_%H%M%S') + f'_{os.getpid()}_{uuid.uuid4().hex[:6]}'   # random suffix: unique even for several fit calls within one second
++        self._vo3_gen_seq = 0
++        self._vo3_t0, self._vo3_gen_acc, self._vo3_t_update = None, 0.0, None   # timers accumulated over a whole update (see vo3/time_* below)
+ 
+         # load checkpoint before doing anything
+         self._load_checkpoint()
+ 
++        # [vo3-repro 2026-10-19] resume guard: if the restored checkpoint already finished training, the original still entered the loop -- one extra update when steps ran out;
++        # when the data ran out, StatefulDataLoader restored at the end of an epoch starts a new full pass (checked on CPU) -> finish directly
++        done_reason = self._vo3_resume_done_reason()
++        if done_reason is not None:
++            print(f'[vo3-repro] restored global_step_{self.global_steps} already finished training ({done_reason}); skipping the training loop, finishing only', flush=True)
++            self.global_steps += 1   # same counting as a normal finish: completed updates = global_steps - 1
++            self._vo3_finish(done_reason + ' (finish after restore)', logger)
++            return
++
+         # perform validation before training
+         # currently, we only support validation using the reward_function.
+         if self.val_reward_fn is not None and self.config.trainer.get('val_before_train', True) and self.config.trainer.test_freq != -1:
+@@ -1382,11 +1660,10 @@ class RayPPOTrainer(object):
+         statistics_dict = self._initialize_statistics_dict()
+         for epoch in range(self.config.trainer.total_epochs):
+             prev = time.time()
+-            batch_step = 0
++            # [vo3-repro 2026-10-19] removed the iter(self.train_dataloader) call made inside the loop after every pass: with persistent_workers it resets the live iterator,
++            # so an epoch never ends and questions are recycled until the steps run out (found in the 10-19 review; CPU reproduction: 8 items, 4 batches per pass, 12 batches read in one epoch)
++            # -> repetition is controlled only by total_epochs
+             for batch_dict in self.train_dataloader:
+-                batch_step += 1
+-                if batch_step% self.train_dataloader_size==0:
+-                    tmp = iter(self.train_dataloader)
+                 print(f"<<<TRAINING_MARK>>> self.global_steps {self.global_steps}: Start batch!!!  Now Time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}")
+ 
+ 
+@@ -1395,6 +1672,8 @@ class RayPPOTrainer(object):
+ 
+                 cur = time.time()
+                 timing_raw['data_time'] = cur - prev
++                if self._vo3_t0 is None:   # [vo3-repro 2026-10-19] first generation batch of this update: start the timer before fetching it
++                    self._vo3_t0, self._vo3_gen_acc = prev, 0.0
+ 
+                 new_batch: DataProto = DataProto.from_single_dict(batch_dict)
+                 new_batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(new_batch.batch))], dtype=object)
+@@ -1444,6 +1723,7 @@ class RayPPOTrainer(object):
+                         gen_cur = time.time()
+                         print(f"<<<TRAINING_MARK>>> self.global_steps {self.global_steps}: batch generation ends !!! Now Time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(gen_cur))}")
+                         print(f"<<<TRAINING_MARK>>> Current batch generation time: {gen_cur - gen_prev} seconds")
++                    self._vo3_gen_acc += timing_raw.get('gen', 0.0)   # [vo3-repro] generation time summed over all generation batches of one update (timing_raw is reset for every batch)
+ 
+ 
+                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
+@@ -1500,6 +1780,7 @@ class RayPPOTrainer(object):
+                                             x = 1
+ 
+                         new_batch.batch['token_level_scores'] = reward_tensor
++                        self._vo3_dump_rollouts(new_batch, reward_tensor, valid_mask, num_gen_batches)
+                         statistics_dict['solve_acc'] += new_batch.non_tensor_batch['acc_scores'].sum()
+                         statistics_dict['solve_format'] += new_batch.non_tensor_batch['format_scores'].sum()
+                         statistics_dict['solve_overlong'] += new_batch.non_tensor_batch['overlong_scores'].sum()
+@@ -1578,6 +1859,7 @@ class RayPPOTrainer(object):
+                                                   norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+                                                   norm_by_importance=norm_by_importance,
+                                                   scale=scale,)
++                        self._vo3_dump_used(batch, num_gen_batches)   # [vo3-repro] after truncation and advantages: the trajectories actually used in this update
+ 
+                     if self.use_reference_policy and self.config.actor_rollout_ref.actor.use_kl_loss and self.config.actor_rollout_ref.actor.kl_loss_coef > 0:
+                         # compute reference log_prob
+@@ -1589,13 +1871,21 @@ class RayPPOTrainer(object):
+                     with _timer('log_prob_and_update_actor', timing_raw):
+                         logp_prev = time.time()
+                         print(f"<<<TRAINING_MARK>>> self.global_steps {self.global_steps}: Start computing log_prob and update actor!!! Now Time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(logp_prev))}")
+-                        actor_output=self.actor_rollout_wg.compute_log_prob_and_update_actor(batch)
++                        actor_batch = batch
++                        if 'vo3_rows' in batch.non_tensor_batch:   # [vo3-repro 2026-10-20] context variants: per-round training rows (see vo3_expand_rounds)
++                            acfg = self.config.actor_rollout_ref.actor
++                            actor_batch, rows_metrics = vo3_expand_rounds(batch, self.tokenizer.pad_token_id, self.actor_rollout_wg.world_size,
++                                                                          bool(acfg.get('ignore_exceed', False)), bool(acfg.get('ignore_void', False)))
++                            metrics.update(rows_metrics)
++                            print(f"<<<TRAINING_MARK>>> [vo3-rows] {len(batch)} trajectories -> {rows_metrics['vo3_rows/rows']} rows (text only {rows_metrics['vo3_rows/rows_text_only']}, padding {rows_metrics['vo3_rows/rows_dummy']}, width {rows_metrics['vo3_rows/width']}), mismatched {rows_metrics['vo3_rows/traj_mismatch']}, row tokens / trajectory tokens = {rows_metrics['vo3_rows/row_tokens_over_traj_tokens']:.2f}", flush=True)
++                        actor_output=self.actor_rollout_wg.compute_log_prob_and_update_actor(actor_batch)
+                         logp_cur = time.time()
+                         print(f"<<<TRAINING_MARK>>> self.global_steps {self.global_steps}: Finish computing log_prob and update actor!!! Now Time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(logp_cur))}")
+                         print(f"<<<TRAINING_MARK>>> Current batch log_prob and update actor time: {logp_cur - logp_prev} seconds")
+ 
+                     actor_output_metrics = reduce_metrics(actor_output.meta_info['metrics'])
+                     metrics.update(actor_output_metrics)
++                    self._vo3_t_update = time.time()   # [vo3-repro] time at which this update finished (validation / checkpointing excluded)
+ 
+                     # log training rollouts
+                     if self.config.trainer.log_training_rollouts_freq > 0 and self.global_steps % self.config.trainer.log_training_rollouts_freq == 0:
+@@ -1618,6 +1908,13 @@ class RayPPOTrainer(object):
+                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
+ 
+                 metrics["train/num_gen_batches"] = num_gen_batches
++                # [vo3-repro 2026-10-19] the official timing_s/* only covers the last generation batch of the update (timing_raw is reset for every batch, so earlier batches are lost when dynamic sampling needs more than one
++                # batch; third review) -> also log per-update totals: generation time over all batches / time from fetching the first batch to the end of the update / whole step including validation and checkpointing
++                metrics['vo3/time_gen_total_s'] = self._vo3_gen_acc
++                metrics['vo3/time_update_wall_s'] = self._vo3_t_update - self._vo3_t0
++                metrics['vo3/time_step_wall_s'] = time.time() - self._vo3_t0
++                self._vo3_t0 = None
++                metrics.update(self._vo3_mem_metrics())   # [vo3-repro 2026-10-20] host memory (a run was SIGKILLed at step 12 on 10-20 without any memory record)
+                 batch = None
+                 num_prompt_in_batch = 0
+                 num_gen_batches = 0
+@@ -1632,14 +1929,14 @@ class RayPPOTrainer(object):
+ 
+                 prev = time.time()
+                 if self.global_steps >= self.total_training_steps:
+-
+-                    # perform validation after training
+-                    if self.val_reward_fn is not None:
+-                        val_metrics = self._validate()
+-                        pprint(f'Final validation metrics: {val_metrics}')
+-                        logger.log(data=val_metrics, step=self.global_steps)
+-                    if self.config.trainer.save_freq > 0 and \
+-                            (self.global_steps - 1) % self.config.trainer.save_freq != 0:
+-                        with _timer('save_checkpoint', timing_raw):
+-                            self._save_checkpoint()
++                    # [vo3-repro 2026-10-19] original: final validation -> (if this step was not saved by save_freq) last checkpoint named by global_steps (= updates + 1) -> step numbers skip on resume; now handled by _vo3_finish
++                    self._vo3_finish('total_training_steps', logger)
+                     return
++
++        # [vo3-repro 2026-10-19] when the training data runs out before total_training_steps (dynamic sampling consumes extra batches per step), the original returned here
++        # without final validation or a last checkpoint -> record DATA_EXHAUSTED.json (for the resume guard), then finish as usual
++        import json
++        print(f'[vo3-repro] training data exhausted: {self.global_steps - 1} updates completed (total_training_steps={self.total_training_steps})', flush=True)
++        with open(os.path.join(self.config.trainer.default_local_dir, 'DATA_EXHAUSTED.json'), 'w') as f:
++            json.dump({'updates': self.global_steps - 1, 'time': time.strftime('%Y-%m-%d %H:%M:%S')}, f)
++        self._vo3_finish('data_exhausted', logger)
+diff --git a/RL/verl/utils/dataset/multimodal_dataset_video.py b/RL/verl/utils/dataset/multimodal_dataset_video.py
+index 4440ad5..ced1b13 100755
+--- a/RL/verl/utils/dataset/multimodal_dataset_video.py
++++ b/RL/verl/utils/dataset/multimodal_dataset_video.py
+@@ -137,6 +137,19 @@ def process_video_adaptive_token_num(video_path: str, max_tokens: int = 768 * 28
+         raise exn
+ 
+ 
++def vo3_lowres_overview(raw_video, raw_sample_fps, max_tokens, min_tokens):
++    # [vo3-repro 2026-10-20] low-resolution full video of context variant B: same frames / resizing as process_video_adaptive_token_num (same raw_video, same number of frames), only the total token
++    # budget becomes max_tokens (default 4096 = 1/4 of 16384, about 1/4 of the pixels per frame); time note as in __getitem__. Returns (video tensor, time note)
++    frames_num = raw_video.shape[0]
++    resample_ele = {
++        "max_pixels": (max_tokens // (frames_num // 2)) * 28 * 28,
++        "min_pixels": (min_tokens // (frames_num // 2)) * 28 * 28,
++    }
++    video, sample_fps = resample_video_from_raw(raw_video, raw_sample_fps, resample_ele, return_video_sample_fps=True)
++    time_instruction = f"This video is uniformly sampled at {(sample_fps):.2f} fps, contains {video.shape[0]} frames from 0 seconds to {(video.shape[0]/sample_fps-0.05):.1f} seconds."
++    return (video, time_instruction)
++
++
+ class MultiModalDatasetVideo(Dataset):
+     """
+     Dataset for video data loading. Similar to MultiModalDataset but handles video instead of images.
+@@ -272,8 +285,13 @@ class MultiModalDatasetVideo(Dataset):
+                         'length': raw_video_tensor.shape[0] / raw_sample_fps
+                     }
+                 time_instruction = f"This video is uniformly sampled at {(sample_fps):.2f} fps, contains {video_tensor.shape[0]} frames from 0 seconds to {(video_tensor.shape[0]/sample_fps-0.05):.1f} seconds."
++                if os.environ.get('VO3_CTX', 'C').upper() == 'B' and os.environ.get('VO3_B_TOKENS', '4096') != 'full':   # [vo3-repro 2026-10-20] context variant B: the low-resolution full video is sent with the question (other variants skip it; VO3_B_TOKENS=full reuses the round-1 overview)
++                    row_dict['raw_multi_modal_metadata']['vo3_lowres'] = vo3_lowres_overview(
++                        raw_video_tensor, raw_sample_fps, int(os.environ.get('VO3_B_TOKENS', 4096)), self.min_pixels)
+             except Exception as e:
+-                print(str(e))
++                # [vo3-repro 2026-10-19] previously only str(e) was printed and the next item silently used: add a tag, the item id and the full traceback (behaviour unchanged)
++                import traceback
++                print(f"[vo3-read-error] doc_id={row_dict.get('doc_id')} video={video_path}: cannot be read, using the next item\n{traceback.format_exc()}", flush=True)
+                 return self.__getitem__(item+1) if item + 1 < len(self) else self.__getitem__(0)
+             
+             raw_prompt = prompt_with_chat_template.replace('<video>', '<|vision_start|><|video_pad|><|vision_end|>' + time_instruction)
+diff --git a/RL/verl/utils/reward_score/tool_reward_without_round_penalty.py b/RL/verl/utils/reward_score/tool_reward_without_round_penalty.py
+index 643909d..425dca4 100644
+--- a/RL/verl/utils/reward_score/tool_reward_without_round_penalty.py
++++ b/RL/verl/utils/reward_score/tool_reward_without_round_penalty.py
+@@ -245,7 +245,113 @@ def calculate_grounding_acc(predict_str_list: list, ground_truth: list):
+     # print(f"<<<DEBUG>>>  calculate_grounding_acc  IoU: {iou}, IoP: {iop}, IoG: {iog}")
+     return (2*iou + iop + iog) / 4.0
+ 
++# [vo3-repro] helpers of the single-turn reward (TGR-Reliance training/grpo/reward.py), copied here so that both rewards parse identically
++_TGA_ANS = re.compile(r"<answer>\s*\(?([A-Z])\)?\s*</answer>", re.S)
++_SPAN = re.compile(r"\[\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\]")
++
++
++def _tga_answer(text):
++    m = _TGA_ANS.findall(text or "")
++    return m[-1] if m else None
++
++
++def _tga_union(spans):
++    out = []
++    for a, b in sorted(spans):
++        if out and a <= out[-1][1]:
++            out[-1][1] = max(out[-1][1], b)
++        else:
++            out.append([a, b])
++    return out
++
++
++def tiou(pred, gt):
++    P, G = _tga_union(pred), _tga_union(gt)
++    if not P or not G:
++        return 0.0
++    inter = sum(max(0.0, min(b1, b2) - max(a1, a2)) for a1, b1 in P for a2, b2 in G)
++    union = sum(b - a for a, b in P) + sum(b - a for a, b in G) - inter
++    return inter / union if union > 0 else 0.0
++
++
++def _rg_think_ok(predict_str_list):
++    """[vo3-repro 2026-10-24] Thinking format of the R_IoU format gate, identical to the single-turn reward (reward_tga_zts_rg.py, zts format):
++    the think region of every round may only contain one or more [s, e] spans (at least one with s < e; after removing the spans only whitespace, commas or semicolons remain),
++    and the answer letter of the last round must be parsable with the single-turn parser. The thinking of the multi-turn SFT data also contains only spans."""
++    rounds = predict_str_list if isinstance(predict_str_list, list) else [predict_str_list]
++    if not rounds:
++        return False
++    for t in rounds:
++        m = re.search(r'<think>(.*?)</think>', t or "", re.DOTALL)
++        if not m:
++            return False
++        region = m.group(1)
++        if not [1 for a, b in _SPAN.findall(region) if float(b) > float(a)]:
++            return False
++        if re.sub(r"[\s,;，、；]", "", _SPAN.sub(" ", region)) != "":
++            return False
++    return _tga_answer(rounds[-1]) is not None
++
++
++_VO3_RG_NOLEN_LOGGED = [False]
++
++
++def _rg_tool_crops(predict_str_list, raw_video_length):
++    """[vo3-repro 2026-10-24] Tool part of the R_IoU gate: every crop request before the last round is parsed with the engine's own tool parser
++    (function_tools_video.prepare_grounding_inputs_video, the function used by process_tool_call, with the same grid duration); if any request is rejected
++    (non-numeric or reversed times, shorter than 1 s after clipping to [0, grid duration], invalid strategy ...) the gate fails. Returns (executed crop intervals, all valid). Missing grid duration -> invalid (reported once)."""
++    import contextlib, io
++    if raw_video_length is None:
++        if not _VO3_RG_NOLEN_LOGGED[0]:
++            _VO3_RG_NOLEN_LOGGED[0] = True
++            print("[vo3-reward] !! R_IoU: vo3_raw_video_length missing (the engine did not pass the grid duration to the reward); crop requests cannot be checked, every response is marked ill-formed", flush=True)
++        return [], False
++    from verl.workers.rollout.vllm_rollout.function_tools_video import prepare_grounding_inputs_video
++    rounds = predict_str_list if isinstance(predict_str_list, list) else [predict_str_list]
++    crops = []
++    for t in rounds[:-1]:
++        try:
++            with contextlib.redirect_stdout(io.StringIO()):   # the tool already printed its clipping warnings during rollout
++                _, (seg, _strategy) = prepare_grounding_inputs_video(t, None, float(raw_video_length))
++        except Exception:
++            return [], False
++        crops.append((float(seg[0]), float(seg[1])))
++    return crops, True
++
++
++def _rg_gt_spans(ground_truth):
++    gt = []
++    for item in (ground_truth.get("clue") or []) if isinstance(ground_truth, dict) else []:
++        ts = item.get("timestamp") if isinstance(item, dict) else None
++        if isinstance(ts, list) and len(ts) == 2 and float(ts[0]) < float(ts[1]):
++            gt.append((float(ts[0]), float(ts[1])))
++    return gt
++
++
++_VO3_REWARD_LOGGED = [False]
++
++
+ def compute_score(prompt: str, predict_str_list: list, ground_truth: list, extra_info: dict = None) -> float:
++    import os as _os
++    if not _VO3_REWARD_LOGGED[0]:   # [vo3-repro 2026-10-23] log once which reward is active (whether VO3_REWARD reached the reward process)
++        _VO3_REWARD_LOGGED[0] = True
++        print(f"[vo3-reward] VO3_REWARD={_os.environ.get('VO3_REWARD', 'official')} pid={_os.getpid()}", flush=True)
++    if _os.environ.get("VO3_REWARD", "official") == "rg":
++        # [vo3-repro 2026-10-23/24] multi-turn R_IoU, the same formula as the single-turn reward (reward_tga_zts_rg.py: (0.1 + 0.5 * IoU) if well-formed else 0;
++        # not the additive variant) --
++        # gate = full structure score of this file, every round's thinking contains only spans, the last round has an answer letter; x (0.1 + 0.5 * tIoU(union of crops, union of GT spans)); correctness is only logged
++        acc = acc_reward(prompt, predict_str_list, ground_truth["answer"], extra_info)
++        if isinstance(acc, dict):
++            return acc
++        format_score, _ = grounding_format_reward(predict_str_list)
++        crops, tool_ok = _rg_tool_crops(predict_str_list, (extra_info or {}).get("vo3_raw_video_length"))
++        # gate = structure (this file) + thinking only spans (single-turn zts format) + every crop request accepted by the real tool (reversed / string / < 1 s requests used to get full marks)
++        fmt = float(format_score == 1.0 and _rg_think_ok(predict_str_list) and tool_ok)
++        if not fmt:
++            return 0.0, acc, fmt
++        gt = _rg_gt_spans(ground_truth)
++        iou = tiou(crops, gt) if crops and gt else 0.0   # IoU of the intervals the tool actually executed (clipped)
++        return 0.1 + 0.5 * iou, acc, fmt
+     acc_reward_weight = extra_info.get('acc_reward_weight', 1.0) if extra_info else 1.0
+     format_reward_weight = extra_info.get('format_reward_weight', 1.0) if extra_info else 1.0
+     decay_penalty_weight = extra_info.get('decay_penalty_weight', 0.0)
+diff --git a/RL/verl/workers/actor/dp_actor.py b/RL/verl/workers/actor/dp_actor.py
+index 8a2d0de..9b8e76a 100755
+--- a/RL/verl/workers/actor/dp_actor.py
++++ b/RL/verl/workers/actor/dp_actor.py
+@@ -60,6 +60,8 @@ class DataParallelPPOActor(BasePPOActor):
+         self.processor = hf_processor(config.model_local_path)
+ 
+     def _prepare_multi_modal_inputs(self, multi_modal_data: Iterable[Any]) -> List[Dict[str, Any]]:
++        if getattr(self, '_vo3_rows_mode', False):
++            return self._vo3_prepare_multi_modal_inputs_cached(multi_modal_data)
+         processed_inputs: List[Dict[str, Any]] = []
+         for idx, modal_entry in enumerate(multi_modal_data):
+             if modal_entry is None:
+@@ -74,6 +76,23 @@ class DataParallelPPOActor(BasePPOActor):
+                 raise KeyError(f"Unsupported multi-modal entry at index {idx}: {list(modal_entry.keys())}")
+         return processed_inputs
+ 
++    def _vo3_prepare_multi_modal_inputs_cached(self, multi_modal_data):
++        # [vo3-repro 2026-10-20] with per-round rows the same video segment (full overview / each crop / B's low-resolution video) appears in several rows: each segment
++        # goes through the processor once and every row concatenates pixel_values_videos / video_grid_thw in its own video order (identical to processing the whole list; see test_vo3_rows_cpu.py); rows without video -> {}
++        cache, out = {}, []
++        for idx, entry in enumerate(multi_modal_data):
++            if entry is None or not entry.get('video'):
++                out.append({})
++                continue
++            parts = []
++            for v in entry['video']:
++                if id(v) not in cache:
++                    cache[id(v)] = dict(self.processor.video_processor([v]))
++                parts.append(cache[id(v)])
++            # rows with a single video segment reuse the cached result (all trajectories of a question share the round-1 full-video processing); several segments are concatenated
++            out.append(parts[0] if len(parts) == 1 else {k: torch.cat([p[k] for p in parts], dim=0) for k in parts[0].keys()})
++        return out
++
+     def _forward_micro_batch(self, micro_batch, temperature) -> Tuple[torch.Tensor, torch.Tensor]:
+         """
+         Returns: 
+@@ -208,6 +227,7 @@ class DataParallelPPOActor(BasePPOActor):
+         micro_batch_size = data.meta_info['micro_batch_size']
+         temperature = data.meta_info['temperature']  # temperature must be in the data.meta_info to avoid slient error
+         use_dynamic_bsz = data.meta_info['use_dynamic_bsz']
++        self._vo3_rows_mode = 'vo3_row_coef' in data.batch.keys()   # [vo3-repro 2026-10-20] per-round training rows of the context variants
+ 
+         select_keys = ['responses', 'input_ids', 'attention_mask', 'position_ids']
+         batch = data.select(batch_keys=select_keys).batch
+@@ -265,6 +285,12 @@ class DataParallelPPOActor(BasePPOActor):
+ 
+         if self.config.use_kl_loss:
+             select_keys.append('ref_log_prob')
++        # [vo3-repro 2026-10-20] per-round training rows of the context variants (trainer.vo3_expand_rounds): a variable number of rows, all in one mini-batch (one optimizer step per step, as the original),
++        # token-mean loss of each row multiplied by vo3_row_coef (instead of / gradient_accumulation); together this equals the original per-trajectory token mean with equal trajectory weights
++        self._vo3_rows_mode = 'vo3_row_coef' in data.batch.keys()
++        if self._vo3_rows_mode:
++            select_keys.append('vo3_row_coef')
++            assert self.config.ppo_micro_batch_size_per_gpu == 1 and not self.config.use_dynamic_bsz, "per-round training rows need micro-batches of one row and no dynamic batching"
+         batch = data.select(batch_keys=select_keys).batch
+         has_multi_modal_inputs = 'multi_modal_data' in data.non_tensor_batch.keys()
+ 
+@@ -277,12 +303,12 @@ class DataParallelPPOActor(BasePPOActor):
+             _multi_modal_inputs = np.array(_processed_inputs, dtype=object)
+             data.non_tensor_batch['multi_modal_inputs'] = _multi_modal_inputs
+             del data.non_tensor_batch['multi_modal_data']
+-            num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
++            num_mini_batches = 1 if self._vo3_rows_mode else data.batch.batch_size[0] // self.config.ppo_mini_batch_size
+             non_tensor_select_keys = ['multi_modal_inputs']
+             dataloader = data.select(select_keys, non_tensor_select_keys).chunk(num_mini_batches)
+-        elif 'multi_modal_inputs' in data.non_tensor_batch.keys():
++        elif 'multi_modal_inputs' in data.non_tensor_batch.keys():   # fsdp_workers ran compute_log_prob first (videos already processed into multi_modal_inputs)
+             has_multi_modal_inputs=True
+-            num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
++            num_mini_batches = 1 if self._vo3_rows_mode else data.batch.batch_size[0] // self.config.ppo_mini_batch_size
+             non_tensor_select_keys = ['multi_modal_inputs']
+             dataloader = data.select(select_keys, non_tensor_select_keys).chunk(num_mini_batches)
+         else:
+@@ -400,7 +426,9 @@ class DataParallelPPOActor(BasePPOActor):
+                         metrics['actor/kl_loss'] = kl_loss.detach().item()
+                         metrics['actor/kl_coef'] = self.config.kl_loss_coef
+ 
+-                    if self.config.use_dynamic_bsz:
++                    if self._vo3_rows_mode:
++                        loss = policy_loss * data['vo3_row_coef'].sum()   # micro-batch = one row
++                    elif self.config.use_dynamic_bsz:
+                         # relative to the dynamic bsz
+                         loss = policy_loss * (len(data) / self.config.ppo_mini_batch_size)
+                     else:
+diff --git a/RL/verl/workers/reward_manager/naive_multithreads_tool.py b/RL/verl/workers/reward_manager/naive_multithreads_tool.py
+index ae7511d..3c4170f 100755
+--- a/RL/verl/workers/reward_manager/naive_multithreads_tool.py
++++ b/RL/verl/workers/reward_manager/naive_multithreads_tool.py
+@@ -93,6 +93,9 @@ class NaiveMultiThreadsToolRewardManager:
+         data_source = data_item.non_tensor_batch['data_source']
+ 
+         extra_info = self.extra_info
++        _L = data_item.non_tensor_batch.get('vo3_raw_video_length') if hasattr(data_item.non_tensor_batch, 'get') else None
++        if _L is not None:   # [vo3-repro 2026-10-24] grid duration of this trajectory's video (passed down by the engine); added only, no global field changed
++            extra_info = dict(self.extra_info, vo3_raw_video_length=float(_L))
+ 
+         question = data_item.non_tensor_batch['raw_prompt']
+ 
+diff --git a/RL/verl/workers/rollout/vllm_rollout/vllm_async_engine_video.py b/RL/verl/workers/rollout/vllm_rollout/vllm_async_engine_video.py
+index 2611a1c..77786f7 100755
+--- a/RL/verl/workers/rollout/vllm_rollout/vllm_async_engine_video.py
++++ b/RL/verl/workers/rollout/vllm_rollout/vllm_async_engine_video.py
+@@ -92,6 +92,29 @@ def _get_model_runner_workers(vllm_config, init_ray: bool = True):
+     print(f"instance_id: {vllm_config.instance_id} initializes with external actors: {actor_names}")
+     return workers
+ 
++def _vo3_mm_copy(mm):
++    # [vo3-repro 2026-10-20] light copy of multi_modal_data: new dict and new lists (the generation loop appends / pops crops on the 'video' list),
++    # the video tensors themselves are shared (read-only). The original deepcopied here: one float32 overview per rollout (median 271 MB), per engine 4 questions x 16 rollouts x (preprocessing + request)
++    # two deepcopies = ~130 copies = ~35 GB, ~280 GB for 8 engines; a run was SIGKILLed (exit 137) at step 12 on 10-20, probably out of host memory. Numerically identical
++    if not isinstance(mm, dict):
++        return mm
++    return {k: (list(v) if isinstance(v, list) else v) for k, v in mm.items()}
++
++
++def _vo3_light_copy_req(req):
++    # [vo3-repro 2026-10-20] replaces deepcopy(req): the generation loop modifies in place only raw_prompt_id (token list +=) and multi_modal_data['video'] (append / pop),
++    # so these two are rebuilt; video_fps_used is a small dict and still deep-copied; all other attributes are read-only and shared (tensors not copied)
++    import copy as _copy
++    r = _copy.copy(req)
++    r.raw_prompt_id = list(req.raw_prompt_id)
++    r.multi_modal_data = _vo3_mm_copy(req.multi_modal_data)
++    if hasattr(req, 'video_fps_used'):
++        r.video_fps_used = deepcopy(req.video_fps_used)
++    if isinstance(getattr(req, 'reward_scores', None), dict):
++        r.reward_scores = dict(req.reward_scores)
++    return r
++
++
+ def pad_to_max_stack(tensor_list: List[torch.Tensor], pad_token_id: int, dim: int) -> torch.Tensor:
+     assert all([t.ndim == 1 for t in tensor_list])
+     max_len = max([t.size(0) for t in tensor_list])
+@@ -349,7 +372,7 @@ class AsyncvLLMEngine:
+         req_list = []
+         for data_idx, _raw_prompt_id in enumerate(prompts.non_tensor_batch["raw_prompt_ids"]):
+             raw_prompt_id = list(_raw_prompt_id)
+-            multimodal_data = deepcopy(prompts.non_tensor_batch["multi_modal_data"][data_idx])
++            multimodal_data = _vo3_mm_copy(prompts.non_tensor_batch["multi_modal_data"][data_idx])   # [vo3-repro] was deepcopy: copy the containers only, share the video tensors
+             video_fps_used = deepcopy(prompts.non_tensor_batch["video_fps_used"][data_idx])
+             raw_multi_modal_metadata = prompts.non_tensor_batch["raw_multi_modal_metadata"][data_idx]
+             raw_prompt = prompts.non_tensor_batch["raw_prompt"][data_idx]
+@@ -386,13 +409,14 @@ class AsyncvLLMEngine:
+             raw_video = raw_multi_modal_metadata.get('video') if isinstance(raw_multi_modal_metadata, dict) else None
+             raw_video_fps = raw_multi_modal_metadata.get('fps') if isinstance(raw_multi_modal_metadata, dict) else None
+             raw_video_length = raw_multi_modal_metadata.get('length') if isinstance(raw_multi_modal_metadata, dict) else None
++            vo3_lowres = raw_multi_modal_metadata.get('vo3_lowres') if isinstance(raw_multi_modal_metadata, dict) else None   # [vo3-repro] variant B, computed by the dataset
+             
+             for idx in range(n):
+                 req = AsyncRolloutRequest(
+                     batch_data_id=data_idx,
+                     rollout_offset=idx,
+                     request_id=str(uuid4()),
+-                    multi_modal_data=deepcopy(multimodal_data),
++                    multi_modal_data=_vo3_mm_copy(multimodal_data),   # [vo3-repro] was deepcopy (one float32 overview per rollout, ~271 MB each)
+                     raw_prompt_id=raw_prompt_id,
+                     reward_scores={},
+                     max_response_len=self.config.rollout.response_length,
+@@ -416,6 +440,7 @@ class AsyncvLLMEngine:
+                 req.raw_multi_modal_metadata = raw_multi_modal_metadata
+                 req.raw_video_length = raw_video_length
+                 req.raw_video_fps = raw_video_fps
++                req.vo3_lowres = vo3_lowres   # [vo3-repro 2026-10-20] low-resolution full video of context variant B (None for other variants)
+                 req_list.append(req)
+ 
+         return req_list
+@@ -492,6 +517,132 @@ class AsyncvLLMEngine:
+ 
+         return input_ids, response, seq, attention_mask, multi_turn_response_mask
+ 
++    # ======================= [vo3-repro 2026-10-20] context variants (ablation) =======================
++    # VO3_CTX: C = original Video-o3 (full overview + text of earlier rounds + all crops so far, code path unchanged) / A = only all crops so far /
++    # B = low-resolution full video + all crops so far / D = text of earlier rounds + all crops so far (no full video) / CS = as C but recorded per round (only to check that per-round training equals the original).
++    # All variants see the full overview in round 1; they differ from the first crop on. A/B have no dialogue history: the model only sees the latest tool error, if any.
++    # The original cumulative sequence is kept as usual (rewards / filtering / statistics use it, identical across variants); the context of each round is stored in _req.vo3_rounds, which post_process turns into per-round training rows.
++    VO3_CONTINUE = ("Continue your reasoning process inside <think> and </think>. If needed, you can keep selecting temporal "
++                    "segments from the original video by outputting <grounding> and </grounding> as before. Once you are ready "
++                    "to provide the final answer, put it inside <answer> and </answer>.")   # the sentence the original appends after every observation
++
++    def _vo3_split_prompt(self, raw_prompt_id):
++        # original round-1 prompt tokens: [system part] + [<|im_start|>user\n ... <|im_end|>\n<|im_start|>assistant\n]; returns the system part and the user text
++        ids = list(raw_prompt_id)
++        start_user = self.tokenizer.convert_tokens_to_ids("<|im_start|>")
++        k = [i for i, t in enumerate(ids) if t == start_user]
++        assert len(k) >= 2, "round-1 prompt: system / user parts not found"
++        sys_ids = ids[:k[1]]
++        user_text = self.tokenizer.decode(ids[k[1]:], skip_special_tokens=False)
++        return sys_ids, user_text
++
++    def _vo3_question_block(self, user_text):
++        # question + options: the original user text from "Answer the following multiple-choice question ..." to "Options:\n[...] " (without the original tool-use advice)
++        a = user_text.find("Answer the following")
++        b = user_text.find("You are advised to first")
++        assert a >= 0 and b > a, f"question block not found: {user_text[:200]!r}"
++        return user_text[a:b]
++
++    def _vo3_d_prefix(self, raw_prompt_id, raw_video_length):
++        # variant D removes the full video from the round-1 prompt: video segment + time note -> one sentence (video duration), other tokens unchanged
++        txt = self.tokenizer.decode(list(raw_prompt_id), skip_special_tokens=False)
++        note = f"(The original full video is {float(raw_video_length or 0):.1f} seconds long; it is not shown again.)"
++        new, n = re.subn(r"<\|vision_start\|><\|video_pad\|><\|vision_end\|>This video is uniformly sampled at [^\n]*? seconds\.", note, txt, count=1)
++        assert n == 1, "variant D: full video segment not found in the round-1 prompt"
++        return self.tokenizer.encode(new, add_special_tokens=False)
++
++    def _vo3_overview_ti(self, raw_prompt_id):
++        # [vo3-repro 2026-10-25] sampling note of the full overview in the round-1 prompt (added by the dataset after the video placeholder), same regex as _vo3_d_prefix
++        txt = self.tokenizer.decode(list(raw_prompt_id), skip_special_tokens=False)
++        m = re.search(r"<\|vision_start\|><\|video_pad\|><\|vision_end\|>(This video is uniformly sampled at [^\n]*? seconds\.)", txt)
++        assert m, "B full resolution: sampling note of the full video not found in the round-1 prompt"
++        return m.group(1)
++
++    def _vo3_ctx_input(self, mode, _req, vllm_input, prefix_length, crops, last_err, d_prefix):
++        # actual generation context from round 2 on (vLLM input: one placeholder per video segment, expanded by vLLM)
++        if mode == 'D':
++            return self._vo3_gen_input(list(d_prefix) + list(vllm_input['prompt_token_ids'][prefix_length:]),
++                                       list(vllm_input['multi_modal_data']['video'][1:]))
++        sys_ids, user_text = self._vo3_split_prompt(_req.raw_prompt_id[:prefix_length])
++        parts, videos = [], []
++        if mode == 'B' and os.environ.get('VO3_B_TOKENS', '4096') == 'full':
++            # [vo3-repro 2026-10-25] B at full resolution (no low-resolution confound): from round 2 on reuse the round-1 overview -- same tensor and sampling note, pixel-identical to the overview kept by C
++            parts.append("Here is the original full video (Observation 0):\n<|vision_start|><|video_pad|><|vision_end|>" + self._vo3_overview_ti(_req.raw_prompt_id) + "\n")
++            videos.append(vllm_input['multi_modal_data']['video'][0])
++        elif mode == 'B' and getattr(_req, 'vo3_lowres', None) is not None:
++            v, ti = _req.vo3_lowres
++            parts.append("Here is the original full video at low resolution (Observation 0):\n<|vision_start|><|video_pad|><|vision_end|>" + ti + "\n")
++            videos.append(v)
++        else:
++            parts.append(f"The original full video is {float(getattr(_req, 'raw_video_length', 0) or 0):.1f} seconds long; it is not shown here.\n")
++        for j, (v, ti) in enumerate(crops, 1):
++            parts.append(f"Here is a refined video clip you selected (Observation {j}):\n<|vision_start|><|video_pad|><|vision_end|>{ti}\n")
++            videos.append(v)
++        parts.append(self._vo3_question_block(user_text))
++        if last_err:
++            parts.append(f"{last_err}")
++        parts.append(self.VO3_CONTINUE)
++        user_ids = self.tokenizer.encode("<|im_start|>user\n" + "".join(parts) + "<|im_end|>\n<|im_start|>assistant\n", add_special_tokens=False)
++        return self._vo3_gen_input(list(sys_ids) + user_ids, videos)
++
++    def _vo3_gen_input(self, ids, videos):
++        # A/D without any video in context (all earlier crops failed): no multi_modal_data (text-only request); placeholders must match the number of videos
++        assert ids.count(self.video_pad_token_id) == len(videos), f"{ids.count(self.video_pad_token_id)} placeholders != {len(videos)} video segments"
++        return {'prompt_token_ids': ids, 'multi_modal_data': {'video': videos}} if videos else {'prompt_token_ids': ids}
++
++    def _vo3_grid(self, video, cache):
++        if id(video) not in cache:
++            cache[id(video)] = self.processor.video_processor([video])['video_grid_thw'][0]
++        return cache[id(video)]
++
++    def _vo3_build_rows(self, req, c_mask, grid_cache):
++        # split a trajectory into per-round rows: row = context actually used for that round (video placeholders expanded on the grid) + that round's response. Whether a response token is trained is taken from
++        # attention x multi-turn mask at the same position of the original cumulative sequence (C) (c_mask, response part) -> exactly the tokens the original trains. Returns (rows, number of mismatched rounds)
++        P0 = req.vo3_prefix_len
++        resp_all = req.all_response_ids.tolist()
++        extra = [int(self._vo3_grid(v, grid_cache).prod().item()) // self.merge_length - 1 for v in req.multi_modal_data['video'][1:]]
++        L = c_mask.shape[0]
++        rows, bad = [], 0
++        for k, rd in enumerate(req.vo3_rounds):
++            n = len(rd['resp'])
++            e = rd['off'] - P0 + sum(extra[:rd['n_crops']])   # start of this round's response inside C's (expanded) response part
++            if resp_all[e:e + n] != rd['resp']:
++                bad += 1
++                continue
++            lm = c_mask[e:min(e + n, L)].to(torch.int8)
++            if lm.shape[0] < n:   # C's response part was truncated at max_total_response_length: the original does not train the cut tokens
++                lm = torch.cat([lm, torch.zeros(n - lm.shape[0], dtype=torch.int8)])
++            grids = [self._vo3_grid(v, grid_cache) for v in rd['videos']]
++            ctx, j = [], 0
++            for t in rd['ctx']:
++                if t == self.video_pad_token_id:
++                    ctx.extend([t] * (int(grids[j].prod().item()) // self.merge_length))
++                    j += 1
++                else:
++                    ctx.append(t)
++            if j != len(grids):
++                bad += 1
++                continue
++            ids = torch.tensor(ctx + rd['resp'], dtype=torch.int64)
++            pos = get_rope_index(self.processor, input_ids=ids, video_grid_thw=torch.stack(grids) if grids else None,
++                                 attention_mask=torch.ones_like(ids))
++            rows.append({'k': k, 'ids': ids.to(torch.int32), 'pos': pos.to(torch.int32), 'n_ctx': len(ctx), 'lm': lm,
++                         'videos': list(rd['videos'])})
++        return rows, bad
++
++    def _vo3_forced_call(self, ground_truth, raw_video_length):
++        # [vo3-repro 2026-10-19] text of the forced crop call in smoke tests: interval = first ground-truth clue rounded (at least 2 s, inside the video), strategy medium; format as required by the system prompt
++        import math
++        clue = (ground_truth or {}).get('clue') if isinstance(ground_truth, dict) else None
++        s, e = (clue[0]['timestamp'] if clue else [0.0, 2.0])
++        L = float(raw_video_length) if raw_video_length else max(float(e), float(s) + 2.0)
++        a = int(max(0, min(math.floor(s), L - 2)))
++        b = int(min(math.floor(L), max(a + 2, math.ceil(e))))
++        # [vo3-repro 2026-10-24] with VO3_REWARD=rg the thinking contains only spans (the R_IoU format gate matches the single-turn zts format; text in the thinking fails the gate); otherwise the original text
++        think = f'[{a}, {b}]' if os.environ.get('VO3_REWARD', 'official') == 'rg' else 'Let me look at this segment more closely.'
++        return (f'<think>{think}</think>\n'
++                f'<grounding>{{"temporal_segment": [{a}, {b}], "sampling_strategy": "medium"}}</grounding>')
++
+     def process_tool_call(
+         self,
+         vllm_input,
+@@ -507,6 +658,7 @@ class AsyncvLLMEngine:
+         error_info = None
+         tool_success = False
+         tool_outputs = None
++        stage = 'ok'   # [vo3-repro 2026-10-19] failure stage: 'parse' = invalid model call (parsing / interval / strategy check failed); 'infra' = parsing passed but cropping / frame reading failed
+         try:
+             tool_type, args = prepare_grounding_inputs_video(
+                 decoded_resp_,
+@@ -519,11 +671,14 @@ class AsyncvLLMEngine:
+             error_info = error_msg
+             tool_type = None
+             args = None
++            stage = 'parse'
+         
+         if error_info is None:
+             if tool_type == 'grounding_temporal':
+                 if raw_video is None or raw_fps is None:
+                     error_info = "Missing raw video or fps for temporal grounding."
++                    stage = 'infra'
++                    print(f"[vo3-tool-infra-error] doc_id={doc_id}: original video or fps missing, cannot crop", flush=True)
+                 else:
+                     temporal_segment, sampling_strategy = args
+                     try:
+@@ -544,12 +699,16 @@ class AsyncvLLMEngine:
+                             'sampling_strategy': sampling_strategy,
+                         }
+                         time_instruction = f"This video is uniformly sampled at {(video_crop_fps):.2f} fps, contains {video_clip_tensor.shape[0]} frames from {(temporal_segment[0]):.1f} seconds to {(temporal_segment[1]):.1f} seconds."
++                        tool_outputs['time_instruction'] = time_instruction   # [vo3-repro 2026-10-20] needed when variants A/B rebuild the user message
+                         # print(f"<<<DEBUG>>> current_iteration: {current_iteration}, time_instruction: {time_instruction}")
+                         tool_success = True
+                     except Exception as crop_ex:
+                         error_msg = f"{type(crop_ex).__name__}: {crop_ex}" if str(crop_ex) else f"{type(crop_ex).__name__} (no message)"
+                         print("<<<ERROR>>> occurs during crop_video: ", error_msg)
+                         error_info = error_msg
++                        stage = 'infra'
++                        import traceback
++                        print(f"[vo3-tool-infra-error] doc_id={doc_id} interval {temporal_segment} strategy {sampling_strategy}: parsing passed but cropping failed\n{traceback.format_exc()}", flush=True)
+             else:
+                 raise ValueError(f"Unsupported tool type: {tool_type}.")
+         
+@@ -600,13 +759,13 @@ class AsyncvLLMEngine:
+ 
+             tool_outputs = error_message
+ 
+-        return new_context_length, tool_outputs, tool_success
++        return new_context_length, tool_outputs, tool_success, stage
+ 
+     async def _async_rollout_a_request(
+         self, req: AsyncRolloutRequest, do_sample: bool = True, is_validate: bool = False, **kwargs
+     ) -> AsyncRolloutRequest:
+         loop = asyncio.get_running_loop()
+-        _req = await loop.run_in_executor(None, lambda: deepcopy(req))
++        _req = _vo3_light_copy_req(req)   # [vo3-repro 2026-10-20] was deepcopy(req): copied all video tensors again for every rollout, see _vo3_light_copy_req
+         #_req = deepcopy(req)
+         finish_reason_type = None
+         output = None
+@@ -693,6 +852,26 @@ class AsyncvLLMEngine:
+         current_iteration = 0
+         exceed = False
+         void = False
++        # [vo3-repro 2026-10-19] tool-call statistics per trajectory (passed by post_process in non_tensor_batch['vo3_tool'], written to the trajectory jsonl by the trainer):
++        # calls executed / ok returned a video / parse_err invalid model call / infra_err parsing passed but cropping failed / limit_break stopped by round, video or length limits / forced smoke-test call
++        vo3_tool = {'calls': 0, 'ok': 0, 'parse_err': 0, 'infra_err': 0, 'limit_break': 0, 'forced': 0, 'forced_bad': 0,
++                    'off': int(getattr(_req, 'rollout_offset', -1))}   # off = rollout index within the group; with the group uid it identifies a trajectory
++        # smoke tests only (VO3_SMOKE_FORCE_TOOL=1; training rollouts with even index in each group): the round-1 output is replaced by a valid crop call on the ground-truth clue,
++        # deterministically covering "crop call -> video returned -> regenerate -> multi-video sample trained"; not set in real training
++        forced_text, forced_key = None, 'forced'
++        if os.environ.get('VO3_SMOKE_FORCE_TOOL') == '1' and not is_validate and int(getattr(_req, 'rollout_offset', 1)) % 2 == 0:
++            forced_text = self._vo3_forced_call(ground_truth, raw_video_length)
++        elif os.environ.get('VO3_SMOKE_FORCE_BAD') == '1' and not is_validate and int(getattr(_req, 'rollout_offset', 0)) % 4 == 1:
++            # [vo3-repro 2026-10-20] context-variant smoke tests only: rollouts 1/5/9/13 of each group get an invalid call in round 1 (a single time point -> parsing fails),
++            # deterministically covering round 2 after "all earlier crops failed" (A/D text-only rows; B only the low-resolution video); not set in real training
++            forced_text, forced_key = '<think>I should look at the key moment.</think>\n<grounding>{"temporal_segment": [0], "sampling_strategy": "coarse"}</grounding>', 'forced_bad'
++        # [vo3-repro 2026-10-20] context variants (VO3_CTX, see _vo3_ctx_input): A/B/D use their own generation context from round 2 on (training and validation);
++        # the original cumulative sequence vllm_input still accumulates (rewards / group filtering / round, video and length limits use it, identical across variants). During training rollouts each round's context and response are recorded (vo3_rounds)
++        vo3_mode = os.environ.get('VO3_CTX', 'C').upper()
++        assert vo3_mode in ('C', 'A', 'B', 'D', 'CS'), f"unknown VO3_CTX={vo3_mode}"
++        vo3_rec = vo3_mode != 'C' and not is_validate
++        vo3_rounds, vo3_crops, vo3_last_err = [], [], None
++        vo3_d_prefix = self._vo3_d_prefix(_req.raw_prompt_id, raw_video_length) if vo3_mode == 'D' else None
+         while current_iteration < max_iterations:
+             # with self.update_sampling_params(**kwargs):
+ 
+@@ -703,8 +882,14 @@ class AsyncvLLMEngine:
+                     
+             # print("current_iteration: ", current_iteration, " sampling_params: ", sampling_params)
+ 
++            gen_input = vllm_input
++            if vo3_mode in ('A', 'B', 'D') and current_iteration > 0:
++                gen_input = self._vo3_ctx_input(vo3_mode, _req, vllm_input, prefix_length, vo3_crops, vo3_last_err, vo3_d_prefix)
++            if vo3_rec:   # copy before generation (the token list of vllm_input is extended in place afterwards)
++                vo3_ctx_ids = list(gen_input['prompt_token_ids'])
++                vo3_ctx_videos = list(gen_input.get('multi_modal_data', {}).get('video', []))
+             outputs = self.engine.generate(
+-                prompt=vllm_input,  # because we have already convert it to prompt token id
++                prompt=gen_input,  # because we have already convert it to prompt token id
+                 sampling_params=sampling_params,
+                 request_id=_req.request_id+str(current_iteration),
+             )
+@@ -720,10 +905,16 @@ class AsyncvLLMEngine:
+             # if 151645 not in filtered_token_ids:
+             #     filtered_token_ids = filtered_token_ids + [151645,]
+             response_ = filtered_token_ids
++            if forced_text is not None and current_iteration == 0:
++                response_ = self.tokenizer.encode(forced_text)   # [vo3-repro] smoke tests: forced crop call / forced invalid call replaces the round-1 output
++                vo3_tool[forced_key] = 1
+ 
+             # print("content: ", content, "response_: ", response_)
+             # exit()
+ 
++            if vo3_rec:   # off = start of this round's response in the original cumulative sequence (not expanded); n_crops = crops added before (post_process converts to the expanded response part)
++                vo3_rounds.append({'ctx': vo3_ctx_ids, 'videos': vo3_ctx_videos, 'resp': list(response_),
++                                   'off': len(vllm_input['prompt_token_ids']), 'n_crops': len(vllm_input['multi_modal_data'].get('video', [])) - 1})
+             vllm_input['prompt_token_ids'] += response_
+             multi_turn_response_mask.append(torch.ones(len(response_), dtype=attention_mask.dtype, device=attention_mask.device)) # ASSISTANT, Mark as 1
+             context_length += len(response_)
+@@ -738,15 +929,17 @@ class AsyncvLLMEngine:
+                     len(vllm_input['multi_modal_data'].get('video', [])) >= max_video_num
+                 ) or (current_iteration == max_iterations - 1):   # If reached max video num
+                     exceed = True
++                    vo3_tool['limit_break'] += 1
+                     break
+ 
+                 if context_length >= self.config.rollout.max_total_response_length - 2000:
+                     exceed = True
++                    vo3_tool['limit_break'] += 1
+                     break
+ 
+                 old_prompt_token_ids = deepcopy(vllm_input['prompt_token_ids'])
+ 
+-                new_context_length, tool_outputs, tool_success = await loop.run_in_executor(
++                new_context_length, tool_outputs, tool_success, tool_stage = await loop.run_in_executor(
+                     None,
+                     lambda: self.process_tool_call(
+                         vllm_input,
+@@ -761,6 +954,8 @@ class AsyncvLLMEngine:
+                     ),
+                 )
+                 context_length += new_context_length
++                vo3_tool['calls'] += 1
++                vo3_tool[{'ok': 'ok', 'parse': 'parse_err', 'infra': 'infra_err'}[tool_stage]] += 1
+ 
+                 if context_length >= self.config.rollout.max_total_response_length - 2000:
+                     vllm_input['prompt_token_ids'] = old_prompt_token_ids
+@@ -771,6 +966,11 @@ class AsyncvLLMEngine:
+                     multi_turn_response_mask.pop()
+                     exceed = True
+                     break
++                if tool_success:   # [vo3-repro 2026-10-20] context of variants A/B: all successful crops so far + the latest tool error (if any)
++                    vo3_crops.append((tool_outputs['video'], tool_outputs['time_instruction']))
++                    vo3_last_err = None
++                else:
++                    vo3_last_err = tool_outputs
+ 
+             else:
+                 finish_reason = results.outputs[0].finish_reason
+@@ -817,6 +1017,8 @@ class AsyncvLLMEngine:
+             'ground_truth': ground_truth_cur,
+             'raw_prompt': raw_prompt_cur,
+             'uid': uid_list_cur,
++            # [vo3-repro 2026-10-24] video grid duration used by the tool parser (the same value as in process_tool_call), so that the R_IoU gate checks crop requests with the real tool rules
++            'vo3_raw_video_length': np.array([raw_video_length], dtype=object),
+         }
+ 
+         if is_validate:
+@@ -846,6 +1048,9 @@ class AsyncvLLMEngine:
+         _req.avg_response_tokens_per_turn = avg_response_tokens_per_turn
+         _req.round_num = current_iteration + 1
+         _req.void = void
++        _req.vo3_tool = vo3_tool
++        _req.vo3_rounds = vo3_rounds if vo3_rec else None   # [vo3-repro 2026-10-20] per-round records of the variants (post_process turns them into training rows)
++        _req.vo3_prefix_len = prefix_length
+ 
+         # _req.finalize(self.tokenizer, reward_scores=None, finish_reason_type=finish_reason_type)
+ 
+@@ -985,6 +1190,7 @@ class AsyncvLLMEngine:
+         non_tensor_batch['avg_response_tokens_per_turn'] = np.array(avg_response_tokens_per_turn_list, dtype=object)
+         non_tensor_batch['rounds_nums'] = np.array(round_num_list, dtype=object)
+         non_tensor_batch['video_fps_used'] = np.array(video_fps_used_batch, dtype=object)
++        non_tensor_batch['vo3_tool'] = np.array([getattr(req, 'vo3_tool', None) for req in output_req_list], dtype=object)   # [vo3-repro 2026-10-19]
+ 
+         response_length = response.size(1)
+         if position_ids.dim() == 3:  # qwen2vl mrope
+@@ -1037,11 +1243,25 @@ class AsyncvLLMEngine:
+             batch_size=batch_size
+         )
+ 
++        if not is_validate and any(getattr(req, 'vo3_rounds', None) is not None for req in output_req_list):
++            # [vo3-repro 2026-10-20] context variants: every trajectory is split into per-round training rows (expanded by the trainer after the advantages); mismatched rounds go to vo3_tool['row_bad']
++            L_resp = response.size(1)
++            c_mask_all = (attention_mask * multi_turn_response_mask)[:, -L_resp:]
++            grid_cache, rows_all = {}, np.empty(len(output_req_list), dtype=object)
++            for i, req in enumerate(output_req_list):
++                rows_i, bad_i = self._vo3_build_rows(req, c_mask_all[i], grid_cache)
++                rows_all[i] = rows_i
++                req.vo3_tool['rows'], req.vo3_tool['row_bad'] = len(rows_i), bad_i
++                req.vo3_rounds = None
++            non_tensor_batch['vo3_rows'] = rows_all
++
+         if not is_validate:
+             valid_mask, invalid_mask, wrong_and_use_tool_uids, wrong_and_direct_answer_uids, statistics_dict = get_valid_mask(non_tensor_batch['uid'], non_tensor_batch['multi_modal_data'], prompts.meta_info, reward_tensor, acc_reward_tensor, format_reward_tensor, invalid_uids, None)
+             statistics_dict['wrong_and_use_tool_uids'] = wrong_and_use_tool_uids
+             statistics_dict['wrong_and_direct_answer_uids'] = wrong_and_direct_answer_uids
+             non_tensor_batch['multi_modal_data'][invalid_mask] = None
++            if 'vo3_rows' in non_tensor_batch:
++                non_tensor_batch['vo3_rows'][invalid_mask] = None   # [vo3-repro] as above: filtered groups are not trained, release the references
+             non_tensor_batch['valid_mask'] = np.array(valid_mask, dtype=object)
+ 
+         data = DataProto(
+diff --git a/SFT/src/llamafactory/data/mm_plugin.py b/SFT/src/llamafactory/data/mm_plugin.py
+index 9db1740..49e143c 100644
+--- a/SFT/src/llamafactory/data/mm_plugin.py
++++ b/SFT/src/llamafactory/data/mm_plugin.py
+@@ -282,8 +282,13 @@ class MMPluginMixin:
+         num_video = kwargs.get("num_video", None)
+ 
+         sample_strategy = kwargs.get("sample_strategy", None)
++        vo3_role = kwargs.get("vo3_role", None)
+ 
+-        if idx_video is not None and idx_video > 0:
++        if vo3_role == "lowres":
++            # [vo3-repro 2026-10-24] low-resolution full video of variant B: same budget as RL vo3_lowres_overview (total tokens VO3_B_TOKENS=4096, floor = RL data.min_pixels 512), same frames as the full video
++            max_token_number = int(os.environ.get("VO3_B_TOKENS", 4096))
++            min_token_number = 512
++        elif idx_video is not None and (idx_video > 0 or vo3_role == "crop"):
+ 
+             if sample_strategy is None:
+                 sample_strategy = "medium"
+@@ -1538,6 +1543,17 @@ class Qwen2AudioPlugin(BasePlugin):
+         return self._get_mm_inputs(images, videos, audios, processor)
+ 
+ 
++
++def _vo3_crop_fps(n_frames, crop_interval, full_duration, grid_fps=4.0):
++    """[vo3-repro 2026-10-23] Sampling fps of a crop, computed as in the RL engine's crop_video: on the 4 fps grid (n_g = max(2, floor(duration * 4)) frames)
++    calculate_video_frame_range(start = ceil(s * 4), end = min(floor(e * 4), n_g - 1)); fps = sampled frames / grid frames in the range * 4"""
++    n_g = max(2, math.floor(full_duration * grid_fps))
++    max_d = n_g / grid_fps
++    s = max(0.0, min(float(crop_interval[0]), max_d))
++    e = max(0.0, min(float(crop_interval[1]), max_d))
++    start, end = math.ceil(s * grid_fps), min(math.floor(e * grid_fps), n_g - 1)
++    return n_frames / max(1, end - start + 1) * grid_fps
++
+ @dataclass
+ class Qwen2VLPlugin(BasePlugin):
+     vision_bos_token: str = "<|vision_start|>"
+@@ -1634,7 +1650,8 @@ class Qwen2VLPlugin(BasePlugin):
+ 
+             if isinstance(_video, dict):
+                 video = _video["url"]
+-                crop_interval = _video.get("crop", None) if idx_video>0 else None
++                vo3_role = _video.get("vo3_role")   # [vo3-repro 2026-10-24] per-round rows of context variants A/B/D: segment 0 can also be a crop or the low-resolution full video; no key = original logic
++                crop_interval = _video.get("crop", None) if ((idx_video > 0 and vo3_role != "lowres") or vo3_role == "crop") else None
+                 if crop_interval is not None and crop_interval[0] == -1.0 and crop_interval[1] == -1.0:
+                     crop_interval = None
+ 
+@@ -1644,6 +1661,7 @@ class Qwen2VLPlugin(BasePlugin):
+                 sample_strategies.append(sample_strategy)
+             else:
+                 video = _video
++                vo3_role = None
+                 crop_interval = None
+                 crop_intervals.append(crop_interval)
+                 sample_strategy = None
+@@ -1651,6 +1669,7 @@ class Qwen2VLPlugin(BasePlugin):
+ 
+ 
+             kwargs['idx_video'] = idx_video
++            kwargs['vo3_role'] = vo3_role
+             kwargs['video_path'] = video
+             kwargs['num_video'] = len(videos)
+             frames: list[ImageObject] = []
+@@ -1683,6 +1702,9 @@ class Qwen2VLPlugin(BasePlugin):
+                 if video_stream.duration is None:
+                     fps_per_video.append(kwargs.get("video_fps", 2.0))
+                     durations.append(len(frames) / kwargs.get("video_fps", 2.0))
++                elif crop_interval is not None:   # [vo3-repro 2026-10-23] crop fps computed as in the RL engine (the original divided by the full duration: 5-20x too small, so second_per_grid_ts and the sampling note were wrong)
++                    fps_per_video.append(_vo3_crop_fps(len(sample_indices), crop_interval, float(video_stream.duration * video_stream.time_base)))
++                    durations.append(float(video_stream.duration * video_stream.time_base))
+                 else:
+                     fps_per_video.append(len(sample_indices) / float(video_stream.duration * video_stream.time_base))
+                     durations.append(float(video_stream.duration * video_stream.time_base))
+@@ -1730,7 +1752,8 @@ class Qwen2VLPlugin(BasePlugin):
+             if isinstance(_video, dict):
+                 video = _video["url"]
+ 
+-                crop_interval = _video.get("crop", None) if idx_video>0 else None
++                vo3_role = _video.get("vo3_role")   # [vo3-repro 2026-10-24] per-round rows of context variants A/B/D: segment 0 can also be a crop or the low-resolution full video; no key = original logic
++                crop_interval = _video.get("crop", None) if ((idx_video > 0 and vo3_role != "lowres") or vo3_role == "crop") else None
+                 if crop_interval is not None and crop_interval[0] == -1.0 and crop_interval[1] == -1.0:
+                     crop_interval = None
+                 crop_intervals.append(crop_interval)
+@@ -1739,12 +1762,14 @@ class Qwen2VLPlugin(BasePlugin):
+                 sample_strategies.append(sample_strategy)
+             else:
+                 video = _video
++                vo3_role = None
+                 crop_interval = None
+                 crop_intervals.append(crop_interval)
+                 sample_strategy = None
+                 sample_strategies.append(sample_strategy)
+             
+             kwargs['idx_video'] = idx_video
++            kwargs['vo3_role'] = vo3_role
+             kwargs['video_path'] = video
+             kwargs['num_video'] = len(videos)
+             frames: list[ImageObject] = []
+@@ -1788,6 +1813,9 @@ class Qwen2VLPlugin(BasePlugin):
+                 if video_stream.duration is None:
+                     fps_per_video.append(kwargs.get("video_fps", 2.0))
+                     durations.append(len(frames) / kwargs.get("video_fps", 2.0))
++                elif crop_interval is not None:   # [vo3-repro 2026-10-23] crop fps computed as in the RL engine (the original divided by the full duration: 5-20x too small, so second_per_grid_ts and the sampling note were wrong)
++                    fps_per_video.append(_vo3_crop_fps(len(sample_indices), crop_interval, float(video_stream.duration * video_stream.time_base)))
++                    durations.append(float(video_stream.duration * video_stream.time_base))
+                 else:
+                     fps_per_video.append(len(sample_indices) / float(video_stream.duration * video_stream.time_base))
+                     durations.append(float(video_stream.duration * video_stream.time_base))

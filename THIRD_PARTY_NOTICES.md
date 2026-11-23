@@ -32,3 +32,16 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Patches against other repositories
+
+We distribute only diffs against these projects; apply them to the upstream checkouts named in the training READMEs.
+
+| Patch | Upstream | Upstream license |
+|---|---|---|
+| `training/sft/llamafactory.patch` | [hiyouga/LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) `3140c242f0` | Apache License 2.0 |
+| `training/grpo/verl.patch` | [volcengine/verl](https://github.com/volcengine/verl) `f400fb7654b2` | Apache License 2.0 |
+| `training/multiturn/patches/video_o3_qwen25.patch`, `video_o3_qwen3.patch` | [MCG-NJU/Video-o3](https://github.com/MCG-NJU/Video-o3) `e93f563` (main) / `9f1df68` (qwen3vl); its `SFT/` and `RL/` folders are based on LLaMA-Factory and verl | the repository has no license file |
+| `training/multiturn/patches/transformers_4.52_video_utils.patch` | [huggingface/transformers](https://github.com/huggingface/transformers) 4.52.0 (backport of a later upstream fix) | Apache License 2.0 |
+
+Context lines in the patches are excerpts of the upstream files.

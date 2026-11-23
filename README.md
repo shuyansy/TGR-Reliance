@@ -15,7 +15,7 @@ the controlled benchmark **ReliaNeedle**, the evidence-certified training data *
 | ReliaNeedle videos | coming soon |
 | EviCe training data (Hugging Face dataset) | link to be added |
 | SFT and GRPO training code, single-turn (`training/`) | available |
-| Multi-turn training code (Video-o3 format) | coming soon |
+| Multi-turn training code, Video-o3 format (`training/multiturn/`) | available |
 | Model weights, Qwen2.5-VL-7B and Qwen3-VL-8B (SFT + GRPO with the grounding reward) | link to be added |
 | Video-Oasis evaluation | coming soon |
 
@@ -95,7 +95,8 @@ and insertion position. The videos will be released after the Video-MME terms ar
 ## Training
 
 See [`training/README.md`](training/README.md): SFT on EviCe with LLaMA-Factory, then GRPO with verl rewarded only for
-temporal grounding (`R_IoU`), for Qwen2.5-VL-7B and Qwen3-VL-8B.
+temporal grounding (`R_IoU`), for Qwen2.5-VL-7B and Qwen3-VL-8B; the same recipe in the multi-turn (tool-calling) format
+on top of Video-o3 in [`training/multiturn/`](training/multiturn/README.md).
 
 ## License
 
