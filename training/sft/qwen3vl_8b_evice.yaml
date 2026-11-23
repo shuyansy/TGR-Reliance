@@ -1,0 +1,48 @@
+# SFT of Qwen3-VL-8B-Instruct on EviCe (single-turn format <think>[s, e]</think><answer>X</answer>).
+# Run with LF_VIDEO_SAMPLING=official_oasis LF_OASIS_FAMILY=qwen3 (see run_sft.sh): frames, resolution and timestamps then
+# follow the official Qwen3-VL sampler (1 fps, at most 128 frames), the same as in our evaluation.
+### model
+model_name_or_path: Qwen/Qwen3-VL-8B-Instruct
+image_max_pixels: 262144
+video_max_pixels: 786432   # informational: the official sampler sets the resolution
+video_fps: 1.0
+video_maxlen: 128
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: full
+freeze_vision_tower: true
+freeze_multi_modal_projector: false   # Qwen3-VL: train the merger, as in the official Qwen3-VL recipe
+freeze_language_model: false
+deepspeed: examples/deepspeed/ds_z3_config.json
+
+### dataset
+dataset: evice
+dataset_dir: data                 # holds dataset_info.json and evice.json
+media_dir: /path/to/evice_videos  # root with LLaVA-Video-178K/, TimeLens-100K/, Charades/, ... (see the EviCe dataset card)
+template: qwen3_vl
+cutoff_len: 24576                 # official total pixel budget -> <= 16,384 visual tokens + text
+max_samples: 40000
+overwrite_cache: true
+preprocessing_num_workers: 16
+dataloader_num_workers: 4
+
+### output
+output_dir: saves/qwen3vl_8b_evice_sft
+logging_steps: 10
+save_strategy: epoch
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: true
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 1    # we trained on 16 GPUs (global batch 16); use 2 on 8 GPUs
+learning_rate: 1.0e-5
+num_train_epochs: 1.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+bf16: true
+ddp_timeout: 180000000

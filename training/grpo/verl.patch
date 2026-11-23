@@ -1,0 +1,410 @@
+diff --git a/verl/experimental/agent_loop/agent_loop.py b/verl/experimental/agent_loop/agent_loop.py
+index 5c9f034..6a72750 100644
+--- a/verl/experimental/agent_loop/agent_loop.py
++++ b/verl/experimental/agent_loop/agent_loop.py
+@@ -71,6 +71,25 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
+ DEFAULT_ROUTING_CACHE_SIZE = 10000
+ 
+ 
++def _q25_fps_kwargs(processor, video_metadatas) -> dict:
++    """[tga-patch 2026-09-27] Qwen2.5-VL: pass the real sampling fps so second_per_grid_ts is right (HF default 2 fps)."""
++    from verl.workers.rollout.utils import qwen2_5_vl_video_fps
++
++    fps = qwen2_5_vl_video_fps(processor, video_metadatas)
++    return {"fps": fps} if fps else {}
++
++
++def _q3_video_kwargs(processor, videos) -> dict:
++    """[tga-patch 2026-10-05] Qwen3-VL (TGA_Q3_NO_RESIZE=1): do_resize=False as in the official evaluation. Otherwise the video
++    processor shrinks long videos to the checkpoint size.longest_edge (t*h*w <= 25,165,824), so that rollout inputs differ from the
++    official / SFT / evaluation inputs. Must be enabled together with the patch of the same name in vllm_async_server."""
++    import os
++
++    if os.environ.get("TGA_Q3_NO_RESIZE") == "1" and videos and type(processor).__name__ == "Qwen3VLProcessor":
++        return {"do_resize": False}
++    return {}
++
++
+ class AgentLoopMetrics(BaseModel):
+     """Agent loop performance metrics."""
+ 
+@@ -278,6 +297,8 @@ class AgentLoopBase(ABC):
+                 video_metadata=video_metadatas,
+                 return_tensors="pt",
+                 do_sample_frames=False,
++                **_q25_fps_kwargs(self.processor, video_metadatas),
++                **_q3_video_kwargs(self.processor, videos),
+             )
+             prompt_ids = normalize_token_ids(model_inputs.pop("input_ids"))
+         else:
+@@ -682,6 +703,8 @@ class AgentLoopWorker:
+             video_metadata=video_metadatas,
+             return_tensors="pt",
+             do_sample_frames=False,
++            **_q25_fps_kwargs(self.processor, video_metadatas),
++            **_q3_video_kwargs(self.processor, videos),
+         )
+         multi_modal_inputs.pop("input_ids", None)
+         multi_modal_inputs.pop("attention_mask", None)
+@@ -704,6 +727,9 @@ class AgentLoopWorker:
+             "image_grid_thw": multi_modal_inputs.get("image_grid_thw"),
+             "video_grid_thw": multi_modal_inputs.get("video_grid_thw"),
+         }
++        # [tga-patch 2026-09-27] Qwen2.5-VL time positions need second_per_grid_ts (otherwise 1.0, i.e. 2 fps).
++        if multi_modal_inputs.get("second_per_grid_ts") is not None:
++            multi_modal_kwargs["second_per_grid_ts"] = multi_modal_inputs["second_per_grid_ts"]
+         # For transformers>=5.3.0, mm_token_type_ids is only used to calculate position ids.
+         if multi_modal_inputs.pop("mm_token_type_ids", None) is not None:
+             mm_token_type_ids = torch.zeros_like(input_ids)
+diff --git a/verl/models/transformers/monkey_patch.py b/verl/models/transformers/monkey_patch.py
+index a5117d7..e716d04 100644
+--- a/verl/models/transformers/monkey_patch.py
++++ b/verl/models/transformers/monkey_patch.py
+@@ -252,7 +252,7 @@ def patch_forward_with_backends(
+ 
+     forward_with_torch_backend_function = model.__class__.forward
+     forward_with_triton_backend_function = model.__class__.forward
+-    if model.config.model_type in ["qwen2_5_vl", "qwen2_vl"]:
++    if model.config.model_type in ["qwen2_5_vl", "qwen2_vl", "qwen2_5_vl_text", "qwen2_vl_text"]:   # [tga-patch 2026-10-05] checkpoints saved by LLaMA-Factory / transformers 4.57 (nested text_config) load with model_type *_text; without these names the VLM patches (forward / attention / Ulysses split after embedding) were silently skipped
+         from verl.models.transformers.qwen2_vl import forward_with_torch_backend, forward_with_triton_backend
+ 
+         forward_with_torch_backend_function = forward_with_torch_backend
+@@ -354,7 +354,7 @@ def apply_monkey_patch(
+         print("Monkey patch state_dict in AutoModelForCausalLMWithValueHead. ")
+ 
+     # TODO: VLM models only, unify monkey patch to LLM models.
+-    if model.config.model_type in ["qwen2_5_vl", "qwen2_vl"]:
++    if model.config.model_type in ["qwen2_5_vl", "qwen2_vl", "qwen2_5_vl_text", "qwen2_vl_text"]:   # [tga-patch 2026-10-05] checkpoints saved by LLaMA-Factory / transformers 4.57 (nested text_config) load with model_type *_text; without these names the VLM patches (forward / attention / Ulysses split after embedding) were silently skipped
+         # Step 1: patch model to support image-text mixed data
+         if is_transformers_version_in_range(min_version="4.52.0"):
+             from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
+@@ -423,6 +423,7 @@ def apply_monkey_patch(
+ 
+         from verl.models.transformers.qwen3_vl import (
+             forward_with_normal_backend,
++            patch_qwen3_vl_fast_pos_embed_interpolate,
+             patch_qwen3_vl_moe_sparse_moe_block_forward,
+             qwen3_vl_base_forward,
+         )
+@@ -437,6 +438,9 @@ def apply_monkey_patch(
+         if model.config.model_type == "qwen3_vl_moe" and is_transformers_version_in_range(max_version="4.57.3"):
+             patch_qwen3_vl_moe_sparse_moe_block_forward()
+ 
++        # Step 1.6: make fast_pos_embed_interpolate device-safe under FSDP2.
++        patch_qwen3_vl_fast_pos_embed_interpolate()
++
+         # Step 2: patch input for multimodal sequence parallelism
+         if ulysses_sp_size > 1:
+             patch_vlm_for_ulysses_input_slicing(Qwen3VLTextModel)
+diff --git a/verl/models/transformers/qwen3_vl.py b/verl/models/transformers/qwen3_vl.py
+index f385d71..1452a9d 100644
+--- a/verl/models/transformers/qwen3_vl.py
++++ b/verl/models/transformers/qwen3_vl.py
+@@ -146,9 +146,18 @@ def _get_input_embeds(
+     video_grid_thw: Optional[torch.LongTensor] = None,
+ ):
+     inputs_embeds = model.get_input_embeddings()(input_ids)
++    # multi_modal_inputs ride along as nested NonTensorData, so the outer
++    # `micro_batch.to(device)` does not move them. Qwen3-VL's
++    # fast_pos_embed_interpolate uses grid_thw on whatever device pos_embed
++    # lives on; if grid_thw is left on CPU, idx_tensor ends up CPU when
++    # pos_embed.weight reads as CPU under FSDP2 / param_offload, raising
++    # "Expected all tensors to be on the same device".
++    target_device = inputs_embeds.device
+     image_mask, video_mask = None, None
+     if pixel_values is not None:
+-        pixel_values = pixel_values.type(model.visual.dtype)
++        pixel_values = pixel_values.to(target_device).type(model.visual.dtype)
++        if image_grid_thw is not None:
++            image_grid_thw = image_grid_thw.to(target_device)
+         image_embeds, deepstack_image_embeds = unpack_visual_output(model.visual(pixel_values, grid_thw=image_grid_thw))
+         n_image_tokens = (input_ids == model.config.image_token_id).sum().item()
+         n_image_features = image_embeds.shape[0]
+@@ -166,7 +175,9 @@ def _get_input_embeds(
+         inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
+ 
+     if pixel_values_videos is not None:
+-        pixel_values_videos = pixel_values_videos.type(model.visual.dtype)
++        pixel_values_videos = pixel_values_videos.to(target_device).type(model.visual.dtype)
++        if video_grid_thw is not None:
++            video_grid_thw = video_grid_thw.to(target_device)
+         video_embeds, deepstack_video_embeds = unpack_visual_output(
+             model.visual(pixel_values_videos, grid_thw=video_grid_thw)
+         )
+@@ -379,3 +390,92 @@ def patch_qwen3_vl_moe_sparse_moe_block_forward():
+     # Apply the patch
+     Qwen3VLMoeTextSparseMoeBlock.forward = patched_forward
+     logger.info("Monkey patched Qwen3VLMoeTextSparseMoeBlock.forward to fix router_weights bug")
++
++
++def patch_qwen3_vl_fast_pos_embed_interpolate():
++    """Make Qwen3VLVisionModel.fast_pos_embed_interpolate device-robust.
++
++    The upstream implementation builds idx_tensor / weight_tensor with
++    `device=self.pos_embed.weight.device`. Under FSDP2 (with or without
++    param_offload) the wrapped Embedding's .weight can read as cpu while
++    other gathered params and inputs are on cuda, raising
++    "Expected all tensors to be on the same device" inside `self.pos_embed(idx_tensor)`.
++
++    This patch derives the device from the input grid_thw (which the caller
++    is responsible for placing on the active device) and falls back to
++    pos_embed.weight.device.
++    """
++    try:
++        from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLVisionModel
++    except ImportError:
++        return
++
++    original_fn = Qwen3VLVisionModel.fast_pos_embed_interpolate
++
++    @functools.wraps(original_fn)
++    def patched(self, grid_thw):
++        if isinstance(grid_thw, torch.Tensor) and grid_thw.is_cuda:
++            target_device = grid_thw.device
++        else:
++            weight = self.pos_embed.weight
++            local = getattr(weight, "_local_tensor", None)
++            target_device = local.device if local is not None else weight.device
++
++        grid_ts, grid_hs, grid_ws = grid_thw[:, 0], grid_thw[:, 1], grid_thw[:, 2]
++
++        idx_list = [[] for _ in range(4)]
++        weight_list = [[] for _ in range(4)]
++
++        for t, h, w in zip(grid_ts, grid_hs, grid_ws):
++            h_idxs = torch.linspace(0, self.num_grid_per_side - 1, int(h))
++            w_idxs = torch.linspace(0, self.num_grid_per_side - 1, int(w))
++
++            h_idxs_floor = h_idxs.int()
++            w_idxs_floor = w_idxs.int()
++            h_idxs_ceil = (h_idxs.int() + 1).clip(max=self.num_grid_per_side - 1)
++            w_idxs_ceil = (w_idxs.int() + 1).clip(max=self.num_grid_per_side - 1)
++
++            dh = h_idxs - h_idxs_floor
++            dw = w_idxs - w_idxs_floor
++
++            base_h = h_idxs_floor * self.num_grid_per_side
++            base_h_ceil = h_idxs_ceil * self.num_grid_per_side
++
++            indices = [
++                (base_h[None].T + w_idxs_floor[None]).flatten(),
++                (base_h[None].T + w_idxs_ceil[None]).flatten(),
++                (base_h_ceil[None].T + w_idxs_floor[None]).flatten(),
++                (base_h_ceil[None].T + w_idxs_ceil[None]).flatten(),
++            ]
++            weights = [
++                ((1 - dh)[None].T * (1 - dw)[None]).flatten(),
++                ((1 - dh)[None].T * dw[None]).flatten(),
++                (dh[None].T * (1 - dw)[None]).flatten(),
++                (dh[None].T * dw[None]).flatten(),
++            ]
++            for i in range(4):
++                idx_list[i].extend(indices[i].tolist())
++                weight_list[i].extend(weights[i].tolist())
++
++        idx_tensor = torch.tensor(idx_list, dtype=torch.long, device=target_device)
++        weight_tensor = torch.tensor(weight_list, dtype=self.pos_embed.weight.dtype, device=target_device)
++
++        pos_embeds = self.pos_embed(idx_tensor) * weight_tensor[:, :, None]
++        patch_pos_embeds = pos_embeds[0] + pos_embeds[1] + pos_embeds[2] + pos_embeds[3]
++
++        patch_pos_embeds = patch_pos_embeds.split([h * w for h, w in zip(grid_hs.tolist(), grid_ws.tolist())])
++
++        patch_pos_embeds_permute = []
++        merge_size = self.config.spatial_merge_size
++        for pos_embed, t, h, w in zip(patch_pos_embeds, grid_ts.tolist(), grid_hs.tolist(), grid_ws.tolist()):
++            pos_embed = pos_embed.repeat(t, 1)
++            pos_embed = (
++                pos_embed.view(t, h // merge_size, merge_size, w // merge_size, merge_size, -1)
++                .permute(0, 1, 3, 2, 4, 5)
++                .flatten(0, 4)
++            )
++            patch_pos_embeds_permute.append(pos_embed)
++        return torch.cat(patch_pos_embeds_permute)
++
++    Qwen3VLVisionModel.fast_pos_embed_interpolate = patched
++    logger.info("Monkey patched Qwen3VLVisionModel.fast_pos_embed_interpolate for FSDP2 device safety")
+diff --git a/verl/utils/tokenizer.py b/verl/utils/tokenizer.py
+index 0cd521f..4ff72e1 100644
+--- a/verl/utils/tokenizer.py
++++ b/verl/utils/tokenizer.py
+@@ -101,6 +101,31 @@ def hf_tokenizer(name_or_path, correct_pad_token=True, correct_gemma2=True, **kw
+     return tokenizer
+ 
+ 
++def _qwen2_5_vl_float_rope_index(
++    processor, input_ids=None, image_grid_thw=None, video_grid_thw=None, second_per_grid_ts=None, attention_mask=None,
++    **kwargs,
++):
++    """[tga-patch 2026-09-27] (1, L) wrapper over verl's float Qwen2-VL get_rope_index; returns ((3, 1, L), None)."""
++    import torch
++
++    from verl.models.transformers.qwen2_vl import get_rope_index
++
++    assert input_ids.shape[0] == 1, "Qwen2.5-VL rope index wrapper expects a single sequence"
++    if torch.is_tensor(second_per_grid_ts) and second_per_grid_ts.is_floating_point():
++        # vLLM casts processor outputs to the model dtype and multiplies with the 0-d bf16 value, so rollout (and
++        # eval) time ids are computed in bf16 arithmetic; mirror that so actor log-probs see the same positions.
++        second_per_grid_ts = second_per_grid_ts.to(torch.bfloat16)
++    pos = get_rope_index(
++        processor,
++        input_ids=input_ids[0],
++        image_grid_thw=image_grid_thw,
++        video_grid_thw=video_grid_thw,
++        second_per_grid_ts=second_per_grid_ts,
++        attention_mask=attention_mask[0] if attention_mask is not None else None,
++    )
++    return pos.unsqueeze(1), None
++
++
+ def hf_processor(name_or_path, **kwargs):
+     """Create a huggingface processor to process multimodal data.
+ 
+@@ -151,6 +176,9 @@ def hf_processor(name_or_path, **kwargs):
+ 
+         if model_class is not None:
+             processor.get_rope_index = types.MethodType(model_class.get_rope_index, processor)
++            if processor.__class__.__name__ == "Qwen2_5_VLProcessor":
++                # [tga-patch 2026-09-27] HF 4.57 truncates second_per_grid_t to int; vLLM rollout keeps it float.
++                processor.get_rope_index = types.MethodType(_qwen2_5_vl_float_rope_index, processor)
+             if hasattr(model_class, "get_vision_position_ids"):
+                 processor.get_vision_position_ids = types.MethodType(model_class.get_vision_position_ids, processor)
+     except Exception as e:
+diff --git a/verl/workers/rollout/utils.py b/verl/workers/rollout/utils.py
+index 28d426d..5e9e841 100644
+--- a/verl/workers/rollout/utils.py
++++ b/verl/workers/rollout/utils.py
+@@ -14,6 +14,7 @@
+ import asyncio
+ import logging
+ import os
++import re
+ 
+ import numpy as np
+ import ray
+@@ -99,19 +100,43 @@ def qwen2_5_vl_dedup_image_tokens(prompt_ids: list[int], processor):
+     <|vision_start|><|image_pad|><|vision_end|>
+     ```
+     """
+-    if (
+-        processor is not None
+-        and hasattr(processor, "image_processor")
+-        and "Qwen2VLImageProcessor" in processor.image_processor.__class__.__name__
+-    ):
+-        prompt_ids = np.array(prompt_ids)
+-        mask = np.ones(len(prompt_ids), dtype=bool)
+-        is_value = (prompt_ids == processor.image_token_id) | (prompt_ids == processor.video_token_id)
+-        mask[1:] &= ~(is_value[1:] & is_value[:-1])
+-        return prompt_ids[mask].tolist()
+-    else:
++    if processor is None or not hasattr(processor, "image_processor"):
++        return prompt_ids
++
++    if "Qwen2VLImageProcessor" not in processor.image_processor.__class__.__name__:
+         return prompt_ids
+ 
++    # Qwen3-VL's HF processor pre-expands a single video into per-frame blocks:
++    #     <{t} seconds><|vision_start|><|video_pad|>×N<|vision_end|> × num_frames
++    # vLLM's multimodal processor for Qwen3-VL only matches one
++    # <|vision_start|><|video_pad|><|vision_end|> per video (its replacement
++    # callback is invoked once per video item). We must collapse the whole
++    # per-frame region back to that 3-token form, otherwise:
++    #   - the bare image-token dedup leaves num_frames copies of the 3-token
++    #     pattern → HF processor indexes video_metadata[1..] → IndexError
++    #   - leaving the prompt fully expanded → vLLM cannot find the target →
++    #     "Failed to apply prompt replacement for mm_items['video'][0]"
++    if "Qwen3VL" in type(processor).__name__:
++        tokenizer = processor.tokenizer
++        text = tokenizer.decode(prompt_ids, skip_special_tokens=False)
++        text = _QWEN3VL_FRAME_BLOCK_RE.sub(
++            "<|vision_start|><|video_pad|><|vision_end|>", text
++        )
++        return tokenizer.encode(text, add_special_tokens=False)
++
++    prompt_ids = np.array(prompt_ids)
++    mask = np.ones(len(prompt_ids), dtype=bool)
++    is_value = (prompt_ids == processor.image_token_id) | (prompt_ids == processor.video_token_id)
++    mask[1:] &= ~(is_value[1:] & is_value[:-1])
++    return prompt_ids[mask].tolist()
++
++
++# Matches one or more consecutive Qwen3-VL frame blocks. Each block is a
++# `<X.X seconds>` timestamp followed by <|vision_start|><|video_pad|>+<|vision_end|>.
++_QWEN3VL_FRAME_BLOCK_RE = re.compile(
++    r"(?:<-?\d+(?:\.\d+)? seconds><\|vision_start\|>(?:<\|video_pad\|>)+<\|vision_end\|>)+"
++)
++
+ 
+ def update_prometheus_config(config: PrometheusConfig, server_addresses: list[str], rollout_name: str | None = None):
+     """
+@@ -196,3 +221,33 @@ def update_prometheus_config(config: PrometheusConfig, server_addresses: list[st
+ 
+     except Exception as e:
+         logger.error(f"Failed to update Prometheus configuration: {e}")
++
++
++def qwen2_5_vl_video_fps(processor, video_metadatas):
++    """[tga-patch 2026-09-27] Real sampling fps of each video for Qwen2.5-VL; None for any other processor.
++
++    Qwen2.5-VL encodes time only through second_per_grid_ts = temporal_patch_size / fps. Both the HF processor
++    (transformers 4.57) and vLLM's Qwen2.5-VL processor take `fps` from call kwargs (default 2.0) and ignore
++    video_metadata, so without this every video is treated as if it were sampled at 2 fps.
++    fps = sampled frames / duration, the same definition as qwen_vl_utils' sample_fps.
++    """
++    if processor is None or type(processor).__name__ != "Qwen2_5_VLProcessor" or not video_metadatas:
++        return None
++    fps_list = []
++    for meta in video_metadatas:
++        fps = float(meta["fps"])
++        idx, total = meta.get("frames_indices"), meta.get("total_num_frames")
++        n = len(idx) if idx is not None else 0
++        fps_list.append(n * fps / float(total) if n and total else fps)
++    import os
++    if os.environ.get("TGA_Q25_FPS_TRUNC") == "1":
++        # [tga-patch 2026-10-05] Match the official HF evaluation: transformers 4.57 truncates second_per_grid_t = 2/fps to an
++        # integer k; replacing fps by 2/k (k >= 1) gives exactly k both in the rollout (vLLM, float) and on the training side
++        # (verl float + bf16 emulation), as in our evaluation. Without TGA_Q25_FPS_TRUNC the behaviour is unchanged.
++        import torch
++        out = []
++        for f in fps_list:
++            k = int(torch.as_tensor(torch.tensor(2.0 / f, dtype=torch.float32), dtype=torch.int64).item())
++            out.append(2.0 / k if k >= 1 else 1e6)
++        fps_list = out
++    return fps_list
+diff --git a/verl/workers/rollout/vllm_rollout/vllm_async_server.py b/verl/workers/rollout/vllm_rollout/vllm_async_server.py
+index 4a5cb13..184b21e 100644
+--- a/verl/workers/rollout/vllm_rollout/vllm_async_server.py
++++ b/verl/workers/rollout/vllm_rollout/vllm_async_server.py
+@@ -42,7 +42,12 @@ from verl.utils.tokenizer import normalize_token_ids
+ from verl.utils.vllm.vllm_fp8_utils import apply_vllm_fp8_patches
+ from verl.workers.config import HFModelConfig, RolloutConfig
+ from verl.workers.rollout.replica import RolloutMode, RolloutReplica, TokenOutput
+-from verl.workers.rollout.utils import get_max_position_embeddings, qwen2_5_vl_dedup_image_tokens, run_uvicorn
++from verl.workers.rollout.utils import (
++    get_max_position_embeddings,
++    qwen2_5_vl_dedup_image_tokens,
++    qwen2_5_vl_video_fps,
++    run_uvicorn,
++)
+ from verl.workers.rollout.vllm_rollout.utils import (
+     VLLM_LORA_INT_ID,
+     VLLM_LORA_NAME,
+@@ -495,6 +500,18 @@ class vLLMHttpServer:
+             multi_modal_data["video"] = video_data
+ 
+         prompt = TokensPrompt(prompt_token_ids=prompt_ids, multi_modal_data=multi_modal_data)
++        # [tga-patch 2026-09-27] Qwen2.5-VL: vLLM drops video metadata and defaults to fps=2; pass the real fps.
++        if video_data is not None:
++            fps = qwen2_5_vl_video_fps(
++                self.model_config.processor, [v[1] if isinstance(v, tuple) else {} for v in video_data]
++            )
++            if fps:
++                prompt["mm_processor_kwargs"] = {"fps": fps[0] if len(fps) == 1 else fps}
++            # [tga-patch 2026-10-05] Qwen3-VL (TGA_Q3_NO_RESIZE=1): mm_processor_kwargs(do_resize=False) as in the official evaluation; pairs with agent_loop._q3_video_kwargs
++            import os
++
++            if os.environ.get("TGA_Q3_NO_RESIZE") == "1" and type(self.model_config.processor).__name__ == "Qwen3VLProcessor":
++                prompt["mm_processor_kwargs"] = {"do_resize": False, "do_sample_frames": False}
+ 
+         # Add lora request
+         lora_request = None
