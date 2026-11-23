@@ -29,7 +29,8 @@ def uniform_take(items, k):
     return [items[i] for i in idx]
 
 
-def sample_grid(path, fps=1.0, max_frames=64, max_side=768):
+def sample_grid(path, fps=1.0, max_frames=64, max_side=768, t0=None, t1=None):
+    """t0 / t1 (seconds, optional): sample only inside [t0, t1); timestamps are then relative to t0."""
     import cv2
     from PIL import Image
     cap = cv2.VideoCapture(path)
@@ -38,7 +39,11 @@ def sample_grid(path, fps=1.0, max_frames=64, max_side=768):
         cap.release()
         return [], None
     step = vfps / min(fps, vfps)
-    cand = [int(i * step) for i in range(int(total / step))] or [0]
+    f0 = 0 if t0 is None else min(total - 1, max(0, int(round(t0 * vfps))))
+    f1 = total if t1 is None else min(total, max(f0 + 1, int(round(t1 * vfps))))
+    cand = [f0 + int(i * step) for i in range(int((f1 - f0) / step))] or [f0]
+    if t1 is not None and len(cand) < 2 and f1 - f0 >= 2:
+        cand = [f0, f1 - 1]   # window shorter than one sampling step: its first and last frame
     frames, kept = [], []
     for i in uniform_take(cand, max_frames):
         cap.set(cv2.CAP_PROP_POS_FRAMES, i)
@@ -52,19 +57,22 @@ def sample_grid(path, fps=1.0, max_frames=64, max_side=768):
         frames.append(Image.fromarray(cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)))
         kept.append(i)
     cap.release()
-    meta = {"fps": vfps, "duration": total / vfps, "total_num_frames": len(frames), "frames_indices": kept,
+    meta = {"fps": vfps, "duration": (f1 - f0) / vfps, "total_num_frames": len(frames), "frames_indices": [i - f0 for i in kept],
             "video_backend": "opencv", "do_sample_frames": False}
     return frames, meta
 
 
-def sample_qwen(path, family, max_frames=None):
-    """Official Qwen2.5-VL / Qwen3-VL sampler (process_vision_info of the vendored vision_process.py)."""
+def sample_qwen(path, family, max_frames=None, t0=None, t1=None):
+    """Official Qwen2.5-VL / Qwen3-VL sampler (process_vision_info of the vendored vision_process.py).
+    t0 / t1: optional time window (seconds), passed as the official video_start / video_end (RTV-Bench items of Video-Oasis)."""
     from . import vision_process as VP
     d = dict(QWEN_DEFAULTS[family])
     if max_frames:
         d["max_frames"] = max_frames
     vd = {"type": "video", "video": path, "min_pixels": d["min_pixels"], "max_pixels": d["max_pixels"], "total_pixels": d["total_pixels"],
           "min_frames": d["min_frames"], "max_frames": d["max_frames"], "fps": d["fps"]}
+    if t1 is not None:
+        vd["video_start"], vd["video_end"] = float(t0), float(t1)
     kw = {"image_patch_size": 16} if family == "qwen3" else {}
     _, vids, vkw = VP.process_vision_info([[{"role": "user", "content": [vd, {"type": "text", "text": "x"}]}]],
                                           return_video_kwargs=True, return_video_metadata=True, **kw)

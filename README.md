@@ -17,7 +17,7 @@ the controlled benchmark **ReliaNeedle**, the evidence-certified training data *
 | SFT and GRPO training code, single-turn (`training/`) | available |
 | Multi-turn training code, Video-o3 format (`training/multiturn/`) | available |
 | Model weights, Qwen2.5-VL-7B and Qwen3-VL-8B (SFT + GRPO with the grounding reward) | link to be added |
-| Video-Oasis evaluation | coming soon |
+| Video-Oasis evaluation, accuracy and ReGAP (`evaluation/oasis/`) | available |
 
 ## ReGAP
 
@@ -84,6 +84,34 @@ python evaluation/compute_regap.py results/*.jsonl
 For a new model, pass its prompt with `--system` / `--suffix`. The script expects the predicted span as `[start, end]`
 (seconds) inside `<think></think>` and the option letter inside `<answer></answer>`; for other output formats adapt
 `evaluation/utils/parsing.py` (span and answer parsing, and the position of the answer token whose probabilities are read).
+
+## Evaluate a model on Video-Oasis
+
+[Video-Oasis](https://github.com/sejong-rcv/Video-Oasis) accuracy and ReGAP in one pass, for Qwen2.5-VL / Qwen3-VL and models
+trained from them. Questions, frames (official Qwen sampler, 1 fps, at most 128 frames, RTV-Bench time windows) and answer
+extraction are taken from the official repository at commit `adaa458`.
+
+```bash
+git clone https://github.com/sejong-rcv/Video-Oasis.git && git -C Video-Oasis checkout adaa458
+export OASIS_REPO=$PWD/Video-Oasis OASIS_VIDEOS=/path/to/videos   # <benchmark>/videos/... (default: $OASIS_REPO/data/benchmarks/videos)
+for i in 0 1 2 3 4 5 6 7; do
+  CUDA_VISIBLE_DEVICES=$i python evaluation/oasis/eval_oasis.py --family qwen25 --model /path/to/ours-qwen2.5-vl-7b --prompt train \
+      --out results/oasis/ours_shard${i}of8.jsonl --num_shards 8 --shard_id $i --resume &
+done; wait
+python evaluation/oasis/summarize_oasis.py results/oasis/ours_shard*of8.jsonl
+```
+
+Every question gets two requests with the same prompt and frames: the accuracy request (greedy, the model's repetition penalty,
+up to 16,384 new tokens, official answer extraction) and an anchor request (greedy, up to 256 new tokens) that gives the answer,
+the predicted span and its probability. The span and K = 3 random blocks are then deleted as for ReliaNeedle. When a deletion arm
+writes no option letter, the probabilities are read at its answer slot, or after forcing one `<answer>` token; items that still
+have no value are left out of ReGAP (`refusal="exclude"`). Questions whose video is not available locally are not scored.
+On a 280-question subset (20 per source benchmark) we checked that this script builds the same inputs as our original evaluation
+(questions, prompts, answer and span parsing; frames and deletions bitwise on a sample of videos). Its scores differ from our
+archived runs by at most 0.4 accuracy points and 0.02 ReGAP, and per-question probabilities differ as much as in a rerun of the
+original evaluation (vLLM outputs depend slightly on batching).
+`--hf_mrope` (optional, Qwen2.5-VL) makes vLLM compute the video time positions exactly as transformers; the paper's numbers were
+computed without it.
 
 ## ReliaNeedle
 

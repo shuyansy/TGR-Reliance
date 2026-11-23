@@ -91,3 +91,50 @@ def letter_dist(output, tokenizer, n, hint=None):
             probs[L] += math.exp(info.logprob)
     Z = sum(probs.values())
     return {k: v / Z for k, v in probs.items()} if Z > 1e-9 else None
+
+
+ANS_RE = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.DOTALL | re.IGNORECASE)
+
+
+def parse_letter_simple(text, n):
+    """Letter rule of the Video-Oasis ReGAP evaluation: a standalone letter inside <answer>...</answer>, else the first one."""
+    hi = LETTERS[n - 1]
+    m = ANS_RE.search(text or "")
+    if m:
+        lm = re.search(rf"\b([A-{hi}])\b", m.group(1))
+        if lm:
+            return lm.group(1)
+    lm = re.search(rf"\b([A-{hi}])\b", text or "")
+    return lm.group(1) if lm else None
+
+
+def agg_letters(logprobs_at_pos, tokenizer, n):
+    probs = {L: 0.0 for L in LETTERS[:n]}
+    for tid, info in logprobs_at_pos.items():
+        L = _piece_letter(tokenizer.decode([tid]))
+        if L and L in probs:
+            probs[L] += math.exp(info.logprob)
+    return probs
+
+
+def slot_read(output, tokenizer, n):
+    """Letter probabilities at the token after the last '<answer>' or '\\boxed{' of a response without a parsable letter.
+    -> (unnormalised probs | None, marker found or None)."""
+    o = output.outputs[0]
+    pieces = [tokenizer.decode([t]) for t in o.token_ids]
+    text, starts = "", []
+    for p in pieces:
+        starts.append(len(text))
+        text += p
+    ends = [starts[i] + len(pieces[i]) for i in range(len(pieces))]
+    low, pos, used = text.lower(), -1, None
+    for mk in ("<answer>", "\\boxed{"):
+        j = low.rfind(mk)
+        if j > pos:
+            pos, used = j, mk
+    if pos < 0:
+        return None, None
+    slot = next((i for i in range(len(pieces)) if ends[i] > pos + len(used)), None)
+    if slot is None or o.logprobs is None or slot >= len(o.logprobs):
+        return None, used
+    return agg_letters(o.logprobs[slot], tokenizer, n), used

@@ -10,7 +10,9 @@ Conventions (identical to the paper's tables):
   * probabilities are clipped to [1e-4, 1 - 1e-4] before the logit;
   * random blocks after which the model gives no option letter are left out of the average over k;
     if no block gives a letter, the item is not measurable;
-  * if the model gives no option letter after its span is deleted ("refusal"), p(v \\ s_hat) = 1 / n_options;
+  * if the model gives no option letter after its span is deleted ("refusal"), p(v \\ s_hat) = 1 / n_options
+    (ReliaNeedle, refusal="chance"); on Video-Oasis the evaluator re-reads the probabilities at the answer slot and items
+    that remain without a value are left out (refusal="exclude");
   * items without a full-video answer or without a predicted span are not measurable (they still count for accuracy);
   * Hit / Miss: union IoU between the predicted spans and the ground-truth span >= 0.3 / < 0.3.
 
@@ -55,10 +57,10 @@ def item_status(item):
     return "ok" if item.get("p_span_deleted") is not None else "refusal"
 
 
-def item_gap(item, clip=CLIP):
+def item_gap(item, clip=CLIP, refusal="chance"):
     """c_i of Eq. (1), or None when the item is not measurable."""
     st = item_status(item)
-    if st not in ("ok", "refusal"):
+    if st not in ("ok", "refusal") or (st == "refusal" and refusal == "exclude"):
         return None
     k = int(item.get("n_options") or 4)
     p_span = float(item["p_span_deleted"]) if st == "ok" else 1.0 / k
@@ -94,9 +96,9 @@ def accuracy(items):
     return 100.0 * sum(bool(it.get("correct")) for it in items) / len(items)
 
 
-def regap(items, clip=CLIP, tau=None):
+def regap(items, clip=CLIP, tau=None, refusal="chance"):
     """ReGAP over the measurable items. Returns dict(regap, tau, n_measurable); tau can be fixed by the caller."""
-    meas = [(it, item_gap(it, clip)) for it in items]
+    meas = [(it, item_gap(it, clip, refusal)) for it in items]
     meas = [(it, c) for it, c in meas if c is not None]
     if not meas:
         return {"regap": float("nan"), "tau": float("nan"), "n_measurable": 0}
@@ -105,28 +107,28 @@ def regap(items, clip=CLIP, tau=None):
     return {"regap": sum(c for _, c in meas) / len(meas) / tau, "tau": tau, "n_measurable": len(meas)}
 
 
-def summarize(items, clip=CLIP, hit_iou=HIT_IOU):
+def summarize(items, clip=CLIP, hit_iou=HIT_IOU, refusal="chance"):
     """The columns of Table 1: Acc. (all items), R@0.3 and ReGAP All / Hit / Miss (measurable items)."""
-    r = regap(items, clip)
+    r = regap(items, clip, refusal=refusal)
     tau = r["tau"]
-    meas = [it for it in items if item_gap(it, clip) is not None]
+    meas = [it for it in items if item_gap(it, clip, refusal) is not None]
     hit = [it for it in meas if it.get("gt_span") and span_iou(it.get("pred_spans"), it["gt_span"]) >= hit_iou]
     miss = [it for it in meas if it not in hit]
-    part = lambda xs: (sum(item_gap(it, clip) for it in xs) / len(xs) / tau) if xs else float("nan")
+    part = lambda xs: (sum(item_gap(it, clip, refusal) for it in xs) / len(xs) / tau) if xs else float("nan")
     return {"n": len(items), "acc": accuracy(items), "n_measurable": len(meas),
             "r_at_0.3": 100.0 * len(hit) / len(meas) if meas else float("nan"),
             "regap": r["regap"], "regap_hit": part(hit), "regap_miss": part(miss), "tau": tau, "n_hit": len(hit), "n_miss": len(miss)}
 
 
-def bootstrap(items, n_boot=1000, seed=0, clip=CLIP, alpha=0.05):
+def bootstrap(items, n_boot=1000, seed=0, clip=CLIP, alpha=0.05, refusal="chance"):
     """Item-level bootstrap CI of ReGAP; tau is re-estimated in every resample."""
     rng = random.Random(seed)
     vals = []
     for _ in range(n_boot):
         s = [items[rng.randrange(len(items))] for _ in items]
-        v = regap(s, clip)["regap"]
+        v = regap(s, clip, refusal=refusal)["regap"]
         if v == v:
             vals.append(v)
     vals.sort()
     lo, hi = vals[int(alpha / 2 * len(vals))], vals[int((1 - alpha / 2) * len(vals)) - 1]
-    return {"regap": regap(items, clip)["regap"], "ci_low": lo, "ci_high": hi, "n_boot": len(vals)}
+    return {"regap": regap(items, clip, refusal=refusal)["regap"], "ci_low": lo, "ci_high": hi, "n_boot": len(vals)}
