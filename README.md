@@ -13,10 +13,10 @@ the controlled benchmark **ReliaNeedle**, the evidence-certified training data *
 | ReliaNeedle evaluation for new models (`evaluation/eval_relianeedle.py`) | available |
 | ReliaNeedle annotations (`relianeedle/relianeedle.json`) | available |
 | ReliaNeedle videos | coming soon |
-| EviCe training data (Hugging Face dataset `EviCe`) | available on request during review |
+| EviCe training data (Hugging Face dataset) | link to be added |
 | SFT and GRPO training code, single-turn (`training/`) | available |
 | Multi-turn training code (Video-o3 format) | coming soon |
-| Model weights, Qwen2.5-VL-7B and Qwen3-VL-8B (SFT + GRPO with the grounding reward) | available on request during review |
+| Model weights, Qwen2.5-VL-7B and Qwen3-VL-8B (SFT + GRPO with the grounding reward) | link to be added |
 | Video-Oasis evaluation | coming soon |
 
 ## ReGAP
