@@ -13,9 +13,10 @@ the controlled benchmark **ReliaNeedle**, the evidence-certified training data *
 | ReliaNeedle evaluation for new models (`evaluation/eval_relianeedle.py`) | available |
 | ReliaNeedle annotations (`relianeedle/relianeedle.json`) | available |
 | ReliaNeedle videos | coming soon |
-| EviCe training data | coming soon |
-| SFT and GRPO training code (Qwen2.5-VL-7B, Qwen3-VL-8B; single-turn and multi-turn) | coming soon |
-| Model weights (SFT + GRPO with the grounding reward) | coming soon |
+| EviCe training data (Hugging Face dataset `EviCe`) | available on request during review |
+| SFT and GRPO training code, single-turn (`training/`) | available |
+| Multi-turn training code (Video-o3 format) | coming soon |
+| Model weights, Qwen2.5-VL-7B and Qwen3-VL-8B (SFT + GRPO with the grounding reward) | available on request during review |
 | Video-Oasis evaluation | coming soon |
 
 ## ReGAP
@@ -90,6 +91,11 @@ For a new model, pass its prompt with `--system` / `--suffix`. The script expect
 Video-MME video (the *haystack*); the question can only be answered from the needle. `relianeedle/relianeedle.json` lists
 for every item the question, options, answer letter, needle span (seconds) and, for 646 of the 725 items, the source videos
 and insertion position. The videos will be released after the Video-MME terms are cleared.
+
+## Training
+
+See [`training/README.md`](training/README.md): SFT on EviCe with LLaMA-Factory, then GRPO with verl rewarded only for
+temporal grounding (`R_IoU`), for Qwen2.5-VL-7B and Qwen3-VL-8B.
 
 ## License
 
