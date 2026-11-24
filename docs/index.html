@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-  <link rel="stylesheet" href="static/css/style.css?v=20261125d">
+  <link rel="stylesheet" href="static/css/style.css?v=20261125e">
 </head>
 <body>
 
@@ -95,8 +95,7 @@
 
 <section class="section" id="regap">
   <h2 class="h2 reveal"><span class="kicker">01</span> ReGAP: does the answer need the span?</h2>
-  <p class="lead reveal">Delete the frames of the predicted span and watch the answer. Then delete equally long <span class="c-rand">random blocks</span> instead.
-    If the answer relies on the span, only the first deletion should hurt.</p>
+  <p class="lead reveal">Delete the predicted span, then equally long <span class="c-rand">random blocks</span>. If the answer relies on the span, only the first deletion hurts.</p>
 
   <div class="card demo reveal" id="regapDemo">
     <div class="demo-top">
@@ -117,8 +116,7 @@
     </div>
     <div class="demo-bottom">
       <div class="qbox"><span class="q-tag">Q</span> <span id="regapQ"></span> <span class="ans" id="regapA"></span>
-        <p class="small-note">All three models answer correctly and their predicted spans overlap the needle.
-          Lanes show the span and the random blocks of the selected model.</p></div>
+</div>
       <div><div class="bars-title" id="regapBarsTitle">p(answer) with the full video</div><div class="bars" id="regapBars"></div></div>
     </div>
     <p class="note" id="regapNote"></p>
@@ -128,34 +126,27 @@
     <div class="f-steps">
       <div class="f-step">
         <div class="f-num">1</div>
-        <h4>Three probabilities per question</h4>
-        <p>The probability the model gives to <i>its own</i> answer when it sees</p>
-        <ul>
-          <li><span class="tex">p_{\text{full}}</span> the full video,</li>
-          <li><span class="tex">p_{\text{span}}</span> the video with its predicted span deleted,</li>
-          <li><span class="tex">\bar p_{\text{rand}}</span> the video with an equally long random block deleted, averaged over <span class="tex">K = 3</span> blocks outside the span.</li>
-        </ul>
+        <h4>Three probabilities</h4>
+        <p>The model's probability for its own answer with the full video <span class="tex">p_{\text{full}}</span>,
+          the span deleted <span class="tex">p_{\text{span}}</span>, or random blocks deleted <span class="tex">\bar p_{\text{rand}}</span>.</p>
       </div>
       <div class="f-step">
         <div class="f-num">2</div>
-        <h4>Reliance on one question</h4>
+        <h4>Per question</h4>
         <div class="tex-block">c = \operatorname{logit}\big(\bar p_{\text{rand}}\big) - \operatorname{logit}\big(p_{\text{span}}\big)</div>
-        <p>How much more the answer loses when its own span is deleted than when random frames are deleted.
-          <span class="tex">\operatorname{logit}(p) = \log\frac{p}{1-p}</span>, with <span class="tex">p</span> clipped to <span class="tex">[10^{-4},\, 1-10^{-4}]</span>.</p>
+        <p>Extra loss from deleting the span instead of random frames.</p>
       </div>
       <div class="f-step">
         <div class="f-num">3</div>
-        <h4>ReGAP over a benchmark</h4>
-        <div class="tex-block">\text{ReGAP} = \frac{\frac{1}{N}\sum_{i} c_i}{\tau}, \qquad \tau = \frac{1}{N}\sum_{i} \big|\operatorname{logit}(p_{\text{full},i})\big|</div>
-        <p><span class="tex">\tau</span> is the model's typical confidence, so ReGAP is comparable across models. No ground-truth span is needed.</p>
+        <h4>Per benchmark</h4>
+        <div class="tex-block">\text{ReGAP} = \frac{1}{\tau}\cdot\frac{1}{N}\sum_{i} c_i</div>
+        <p><span class="tex">\tau</span>: the model's typical confidence, <span class="tex">\tfrac{1}{N}\sum_i |\operatorname{logit} p_{\text{full},i}|</span>.</p>
       </div>
     </div>
     <div class="f-scale">
-      <span><b>ReGAP = 0</b> the span matters no more than random frames</span>
-      <span><b>ReGAP ≈ 1</b> deleting the span typically drops the answer probability to about 0.5</span>
-      <span><b>ReGAP &lt; 0</b> random frames matter more than the span</span>
+      <span><b>0</b> the span matters no more than random frames</span>
+      <span><b>≈ 1</b> deleting the span drops the answer to about 0.5</span>
     </div>
-    <div class="f-live" id="regapLive"></div>
   </div>
 </section>
 
@@ -327,7 +318,7 @@
 </footer>
 
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-<script defer src="static/data/page_data.js?v=20261125d"></script>
-<script defer src="static/js/main.js?v=20261125d"></script>
+<script defer src="static/data/page_data.js?v=20261125e"></script>
+<script defer src="static/js/main.js?v=20261125e"></script>
 </body>
 </html>

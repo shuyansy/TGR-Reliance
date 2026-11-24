@@ -122,17 +122,6 @@
     var CLIP = R.clip || 1e-4;
     var logit = function (p) { p = Math.min(1 - CLIP, Math.max(CLIP, p)); return Math.log(p / (1 - p)); };
     var f2 = function (x) { return (x < 0 ? "−" : "") + Math.abs(x).toFixed(2); };
-    function live() {
-      var m = R.models[sel], lr = logit(m.p_random_deleted), ls = logit(m.p_span_deleted), c = lr - ls;
-      var box = $("#regapLive");
-      box.innerHTML = '<div class="lv-h"><span class="dotc" style="background:' + color[sel] + '"></span>Worked example: <b>' + esc(sel) + '</b> on this question</div>' +
-        '<div class="lv-row"><span class="lv-a"></span></div><div class="lv-row"><span class="lv-b"></span></div>' +
-        '<p class="lv-p">Over all 725 ReliaNeedle questions, ' + esc(sel) + "'s ReGAP is <b>" + f2(m.regap_all) + "</b> (" + names.map(function (n) { return esc(n) + " " + f2(R.models[n].regap_all); }).join(", ") +
-        "). One question only illustrates the computation; ReGAP averages over the benchmark.</p>";
-      tex($(".lv-a", box), "p_{\\text{span}} = " + m.p_span_deleted.toFixed(3) + ",\\quad \\bar p_{\\text{rand}} = " + m.p_random_deleted.toFixed(3) +
-          "\\quad\\Rightarrow\\quad c = " + lr.toFixed(2) + " - (" + ls.toFixed(2) + ") = \\mathbf{" + c.toFixed(2) + "}", true);
-      tex($(".lv-b", box), "c\\,/\\,\\tau = " + c.toFixed(2) + " / " + m.tau.toFixed(2) + " = " + (c / m.tau).toFixed(2), true);
-    }
     function render() {
       var m = R.models[sel], pred = m.pred_spans || [], rb = randBlocks(pred);
       var lp = $("#lanePred"), lrn = $("#laneRand"); lp.innerHTML = ""; lrn.innerHTML = "";
@@ -144,18 +133,17 @@
         var del = (act === "span" && inSpans(t, pred.map(function (s) { return [s[0] - 1, s[1] + 1]; }))) || (act === "rand" && inSpans(t, rb));
         f.classList.toggle("del", del);
       });
-      $("#regapBarsTitle").textContent = act === "full" ? "p(answer) with the full video" : act === "span" ? "p(answer) after deleting each model's predicted span" : "p(answer) after deleting random blocks (average of 3)";
+      $("#regapBarsTitle").textContent = act === "full" ? "p(answer) · full video" : act === "span" ? "p(answer) · predicted span deleted" : "p(answer) · random blocks deleted";
       $$(".bar", bars).forEach(function (row) {
         var mm = R.models[row.dataset.m], p = act === "full" ? mm.p_full : act === "span" ? mm.p_span_deleted : mm.p_random_deleted;
         $(".bf", row).style.width = Math.max(1.5, 100 * (p || 0)) + "%";
         $(".bv", row).textContent = fmt(p, 2);
         row.classList.toggle("sel", row.dataset.m === sel);
       });
-      var note = act === "full" ? "With the full video all three models are confident and correct."
-        : act === "span" ? names.map(function (n) { var x = R.models[n]; return n + " " + fmt(x.p_full) + " → " + fmt(x.p_span_deleted); }).join(" · ") + ". Same evidence found, very different reliance."
-        : "Deleting random blocks barely matters for any of them (" + names.map(function (n) { return fmt(R.models[n].p_random_deleted); }).join(", ") + "). ReGAP compares the two deletions.";
+      var note = act === "full" ? "All three are correct, and all three predicted spans hit the needle."
+        : act === "span" ? "Same evidence found, very different reliance."
+        : "Random blocks barely matter for any of them.";
       $("#regapNote").textContent = note;
-      live();
     }
     mseg.addEventListener("click", function (ev) { var b = ev.target.closest("button"); if (!b) return; sel = b.dataset.m; $$("button", mseg).forEach(function (x) { x.classList.toggle("on", x === b); }); render(); });
     $("#regapAction").addEventListener("click", function (ev) { var b = ev.target.closest("button"); if (!b) return; act = b.dataset.act; $$("#regapAction button").forEach(function (x) { x.classList.toggle("on", x === b); }); render(); });
