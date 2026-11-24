@@ -1,9 +1,12 @@
 # When Does Temporal Grounding Help Video Reasoning?
 
 <p align="center">
-  Yan Shu &nbsp;·&nbsp; Thomas De Min &nbsp;·&nbsp; Moreno D'Incà &nbsp;·&nbsp; Massimiliano Mancini &nbsp;·&nbsp; Paolo Rota<br>
-  MHUG, University of Trento
+    📃 <a href="" target="_blank">Paper</a> | 🤗 <a href="" target="_blank">Model</a> | 🤗 <a href="" target="_blank">Training_Data</a> | 📊 <a href="relianeedle/" target="_blank">Benchmark</a>
 </p>
+
+#### [Yan Shu <sup>1</sup>](https://shuyansy.github.io/), [Thomas De Min <sup>1</sup>](https://scholar.google.com/citations?user=fnh_i0cAAAAJ&hl=en), [Moreno D'Incà <sup>1</sup>](https://scholar.google.com/citations?user=tdTJsOMAAAAJ&hl=en), [Massimiliano Mancini <sup>1</sup>](https://mancinimassimiliano.github.io/), and [Paolo Rota <sup>1</sup>](https://paolorota.eu/)
+
+<sup>1</sup> MHUG, University of Trento, Italy
 
 Code and data for the paper *When Does Temporal Grounding Help Video Reasoning?* (under review).
 
