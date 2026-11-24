@@ -101,3 +101,20 @@ single-turn (left) and multi-turn (right) models (*GRPO w/o cold-start* uses `R_
 ## License
 
 The code is released under the [Apache 2.0 License](LICENSE). ReliaNeedle and EviCe are for research use only.
+
+## Citation
+
+If you find this repository useful, please consider giving a star :star: and citation.
+
+```bibtex
+@article{shu2026when,
+  title={When Does Temporal Grounding Help Video Reasoning?},
+  author={Shu, Yan and De Min, Thomas and D'Inc{\`a}, Moreno and Mancini, Massimiliano and Rota, Paolo},
+  journal={arXiv preprint},
+  year={2026}
+}
+```
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=shuyansy/TGR-Reliance&type=Date)](https://star-history.com/#shuyansy/TGR-Reliance&Date)
