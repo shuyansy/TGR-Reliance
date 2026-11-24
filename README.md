@@ -14,11 +14,11 @@
   <img src="assets/highlights.png" width="100%" alt="Highlights: ReGAP, EviCe and the training recipe">
 </p>
 
-(i) **ReGAP**, a metric of how much the answer relies on the predicted span, without ground-truth span annotations. 🔍
+(i) **ReGAP**, a reliance metric that needs no ground-truth spans. 🔍
 
-(ii) **EviCe**, 20k VideoQA samples with certified evidence spans; training on it more than doubles ReGAP. 🏅
+(ii) **EviCe**, 20k evidence-certified VideoQA samples that more than double ReGAP. 🏅
 
-(iii) **A training recipe**, SFT on EviCe followed by GRPO with a grounding-only reward, that improves both reliance and accuracy. 🍳
+(iii) **A training recipe**, SFT then grounding-only GRPO, raising reliance and accuracy. 🍳
 
 ## ReliaNeedle Leaderboard
 
