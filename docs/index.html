@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>When Does Temporal Grounding Help Video Reasoning?</title>
+  <meta name="description" content="ReGAP measures whether a video model's answer relies on the span it grounds. ReliaNeedle, EviCe, and a training recipe that makes grounding count.">
+  <meta property="og:title" content="When Does Temporal Grounding Help Video Reasoning?">
+  <meta property="og:description" content="Grounding without reliance: most temporally grounded reasoning models answer the same even when their predicted span is deleted. ReGAP, ReliaNeedle, EviCe.">
+  <meta property="og:image" content="static/media/hero_poster.jpg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="static/css/style.css">
+</head>
+<body>
+
+<nav class="nav" id="nav">
+  <a class="brand" href="#top">TGR<span>·</span>Reliance</a>
+  <div class="nav-links">
+    <a href="#regap">ReGAP</a>
+    <a href="#relianeedle">ReliaNeedle</a>
+    <a href="#evice">EviCe</a>
+    <a href="#recipe">Recipe</a>
+    <a href="#agents">Agents</a>
+    <a href="#bibtex">BibTeX</a>
+  </div>
+  <a class="nav-gh" href="https://github.com/shuyansy/TGR-Reliance" target="_blank" rel="noopener">GitHub</a>
+</nav>
+
+<header class="hero" id="top">
+  <div class="hero-bg" aria-hidden="true"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="grid"></div></div>
+  <div class="hero-inner">
+    <p class="eyebrow">Temporally Grounded Reasoning &nbsp;·&nbsp; Video LLMs</p>
+    <h1 class="title">When Does <span class="grad">Temporal Grounding</span><br>Help Video Reasoning?</h1>
+    <p class="authors">
+      <a href="https://shuyansy.github.io/" target="_blank" rel="noopener">Yan&nbsp;Shu</a>,
+      <a href="https://scholar.google.com/citations?user=fnh_i0cAAAAJ&hl=en" target="_blank" rel="noopener">Thomas&nbsp;De&nbsp;Min</a>,
+      <a href="https://scholar.google.com/citations?user=tdTJsOMAAAAJ&hl=en" target="_blank" rel="noopener">Moreno&nbsp;D'Incà</a>,
+      <a href="https://mancinimassimiliano.github.io/" target="_blank" rel="noopener">Massimiliano&nbsp;Mancini</a>,
+      <a href="https://paolorota.eu/" target="_blank" rel="noopener">Paolo&nbsp;Rota</a>
+    </p>
+    <p class="affil"><img src="static/img/mhug_logo.png" alt="MHUG logo"> MHUG, University of Trento, Italy</p>
+    <div class="buttons">
+      <span class="btn disabled" title="Coming soon">Paper <small>soon</small></span>
+      <a class="btn" href="https://github.com/shuyansy/TGR-Reliance" target="_blank" rel="noopener">Code</a>
+      <a class="btn" href="https://huggingface.co/collections/sy1998/when-does-temporal-grounding-help-video-reasoning-6b058ea312ac2e5751e6b735" target="_blank" rel="noopener">Models</a>
+      <a class="btn" href="https://huggingface.co/datasets/sy1998/EviCe" target="_blank" rel="noopener">EviCe</a>
+      <a class="btn" href="https://huggingface.co/datasets/sy1998/ReliaNeedle" target="_blank" rel="noopener">ReliaNeedle</a>
+    </div>
+
+    <div class="hero-card reveal">
+      <div class="hero-video-wrap">
+        <video id="heroVideo" src="static/media/hero_needle.mp4" poster="static/media/hero_poster.jpg" autoplay muted loop playsinline></video>
+        <div class="hero-badge" id="heroBadge"><span class="dot"></span><span id="heroBadgeText">Haystack · Video-MME</span></div>
+        <div class="hero-speed" id="heroSpeed">10×</div>
+      </div>
+      <div class="hero-timeline" id="heroTimeline">
+        <div class="tl-track"><div class="tl-needle" id="heroNeedle"><span>needle</span></div><div class="tl-head" id="heroHead"></div></div>
+        <div class="tl-ticks" id="heroTicks"></div>
+      </div>
+      <div class="hero-q">
+        <span class="q-tag">Q</span>
+        <span id="heroQuestion"></span>
+        <div class="opts" id="heroOptions"></div>
+      </div>
+      <p class="hero-cap">A <b>ReliaNeedle</b> item: a short STAR / Charades clip (the <span class="c-needle">needle</span>) is inserted into an unrelated
+        Video-MME video. Only the needle can answer the question. Playback is 10× outside the needle and 2.5× inside.</p>
+    </div>
+
+    <p class="tldr reveal"><b>TL;DR</b> Temporally grounded reasoning models point at the right moment, but their answers often do not depend on it.
+      We measure this <i>grounding reliance</i> with <b>ReGAP</b>, build data (<b>EviCe</b>) and a recipe that make grounding count,
+      and show that better grounding improves answers only when the answer relies on it.</p>
+  </div>
+</header>
+
+<section class="stats reveal">
+  <div class="stat"><div class="num" data-count="725">0</div><div class="lbl">ReliaNeedle questions</div></div>
+  <div class="stat"><div class="num" data-count="14">0</div><div class="lbl">models evaluated</div></div>
+  <div class="stat"><div class="num" data-count="20624">0</div><div class="lbl">EviCe samples</div></div>
+  <div class="stat"><div class="num" data-count="17321">0</div><div class="lbl">EviCe videos</div></div>
+  <div class="stat"><div class="num"><span data-count="9">0</span>/10</div><div class="lbl">TGR models rely on their span less than their backbone</div></div>
+</section>
+
+<section class="section" id="abstract">
+  <h2 class="h2 reveal">Abstract</h2>
+  <div class="card prose reveal">
+    <p>Temporally Grounded Reasoning (TGR) models first predict the video spans that support their answer, and then answer the question.
+      Whether the answer actually depends on these spans is still unclear, and existing benchmarks were not designed to measure this dependence,
+      which we call <b>grounding reliance</b>. We study this by introducing <b>ReliaNeedle</b>, a controlled needle-in-a-haystack benchmark whose answers
+      require the visual evidence inside the annotated span. To measure reliance without ground-truth span annotations, we introduce <b>ReGAP</b>, which
+      compares the confidence change after deleting the predicted span with that after deleting equally long random segments, and validate it on ReliaNeedle.
+      Despite strong results on standard metrics, most TGR models rely on their predicted spans less than their pretrained backbones do. We trace this weakness
+      to training data and recipes. For the data, we introduce <b>RelyGen</b> to annotate VideoQA pairs with correctly located, necessary evidence spans;
+      training on just 20k such samples more than doubles ReGAP. Our training analysis shows that supervised initialization is needed to couple answering with
+      localization. Subsequent reinforcement learning with a grounding-only reward improves both reliance and accuracy, whereas rewarding answers erodes reliance.
+      Finally, better temporal grounding improves accuracy only for high-reliance models, showing that temporal grounding helps video reasoning only when the
+      answer relies on it.</p>
+  </div>
+  <figure class="figure reveal">
+    <img src="static/img/highlights.png" alt="Highlights: ReGAP, EviCe and the training recipe" loading="lazy">
+    <figcaption>(i) <b>ReGAP</b> measures how much a model's answer relies on its predicted span. (ii) <b>EviCe</b>, 20k evidence-certified VideoQA samples,
+      more than doubles ReGAP. (iii) <b>SFT then grounding-only GRPO</b> raises both reliance and accuracy.</figcaption>
+  </figure>
+</section>
+
+<section class="section" id="regap">
+  <h2 class="h2 reveal"><span class="kicker">01</span> ReGAP: does the answer need the span?</h2>
+  <p class="lead reveal">Delete the frames of the predicted span and watch the answer. Then delete equally long <span class="c-rand">random blocks</span> instead.
+    If the answer relies on the span, only the first deletion should hurt.</p>
+
+  <div class="card demo reveal" id="regapDemo">
+    <div class="demo-top">
+      <div class="seg" id="regapModel"></div>
+      <div class="seg" id="regapAction">
+        <button data-act="full" class="on">Full video</button>
+        <button data-act="span">Delete predicted span</button>
+        <button data-act="rand">Delete random blocks</button>
+      </div>
+    </div>
+    <div class="strip-wrap">
+      <div class="strip" id="regapStrip"></div>
+      <div class="lanes">
+        <div class="lane"><span class="lane-lbl c-needle">needle</span><div class="lane-track" id="laneNeedle"></div></div>
+        <div class="lane"><span class="lane-lbl c-pred">predicted</span><div class="lane-track" id="lanePred"></div></div>
+        <div class="lane"><span class="lane-lbl c-rand">random</span><div class="lane-track" id="laneRand"></div></div>
+      </div>
+    </div>
+    <div class="demo-bottom">
+      <div class="qbox"><span class="q-tag">Q</span> <span id="regapQ"></span> <span class="ans" id="regapA"></span></div>
+      <div class="bars" id="regapBars"></div>
+    </div>
+    <p class="note" id="regapNote"></p>
+  </div>
+
+  <div class="formula reveal">
+    <div class="fx">c = logit( p̄<sub>random deleted</sub> ) − logit( p<sub>span deleted</sub> )</div>
+    <div class="fx">ReGAP = 𝔼[ c ] / τ, &nbsp; τ = 𝔼[ |logit p<sub>full</sub>| ]</div>
+    <p>p is the model's probability for its own answer. ReGAP = 0: the predicted span matters no more than random frames. ReGAP ≈ 1: deleting the span
+      typically drops the answer probability to about 0.5. Random blocks have the same number of frames as the span and are placed outside it; their positions
+      above are illustrative, the probabilities are the real ones for this item.</p>
+  </div>
+</section>
+
+<section class="section" id="relianeedle">
+  <h2 class="h2 reveal"><span class="kicker">02</span> ReliaNeedle: evidence you can't answer without</h2>
+  <p class="lead reveal">725 four-option questions. Each video inserts a real action clip into an unrelated Video-MME video, so the answer lives
+    in a known span and only there. This lets us validate ReGAP and split reliance by whether the predicted span <i>hits</i> or <i>misses</i> the evidence.</p>
+
+  <div class="card build reveal" id="needleBuild">
+    <div class="build-row"><span class="row-lbl">Haystack <small>Video-MME</small></span><div class="row-frames" id="buildHay"></div></div>
+    <div class="build-row"><span class="row-lbl c-needle">Needle <small>STAR / Charades</small></span><div class="row-frames needle-row" id="buildNeedle"></div></div>
+    <div class="build-row"><span class="row-lbl">ReliaNeedle video</span><div class="row-frames merged" id="buildMerged"></div></div>
+    <button class="replay" id="buildReplay">Replay</button>
+  </div>
+
+  <h3 class="h3 reveal">Leaderboard</h3>
+  <p class="lead small reveal">Hit / Miss: ReGAP on items where the predicted span overlaps the evidence (IoU ≥ 0.3) or not. Click a column to sort.</p>
+  <div class="card table-card reveal">
+    <div class="legend"><span class="lg ours">Ours (SFT + GRPO, grounding reward)</span><span class="lg backbone">Backbone</span><span class="lg tgr">Existing TGR model</span></div>
+    <table class="lb" id="leaderboard">
+      <thead><tr>
+        <th data-k="name">Model</th><th data-k="regap" class="sorted">ReGAP ▾</th><th data-k="hit">Hit</th><th data-k="miss">Miss</th><th data-k="acc">Acc. (%)</th><th data-k="r03">R@0.3 (%)</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="callout reveal"><b>Grounding without reliance.</b> Nine of ten TGR models rely on their predicted span less than their own backbone,
+    and even when their span is correct (Hit), deleting it often leaves the answer unchanged. On standard benchmarks, models keep about 90% of their
+    accuracy after the annotated evidence is deleted, so these benchmarks cannot reveal it.</div>
+</section>
+
+<section class="section" id="evice">
+  <h2 class="h2 reveal"><span class="kicker">03</span> EviCe: evidence-certified training data</h2>
+  <p class="lead reveal">A sample enters EviCe only if <b>two judges from different model families</b> answer correctly from the evidence span alone,
+    and fail once the span is deleted. 20k such samples more than double ReGAP.</p>
+
+  <div class="cert-grid" id="certGrid"></div>
+
+  <div class="audit card reveal">
+    <div class="audit-txt"><h4>Why certify?</h4>
+      <p>Deleting the annotated span of existing TGR training data barely matters: a judge keeps answering correctly. On EviCe the evidence is necessary.</p></div>
+    <div class="audit-bars" id="auditBars">
+      <div class="ab"><span>NExT-GQA</span><div class="ab-track"><div class="ab-fill" data-v="90.8"></div></div><b>90.8%</b></div>
+      <div class="ab"><span>CG-Bench</span><div class="ab-track"><div class="ab-fill" data-v="89.4"></div></div><b>89.4%</b></div>
+      <div class="ab"><span>Seeker-173K</span><div class="ab-track"><div class="ab-fill" data-v="83.5"></div></div><b>83.5%</b></div>
+      <div class="ab"><span>Video-Thinker-10K</span><div class="ab-track"><div class="ab-fill" data-v="81.9"></div></div><b>81.9%</b></div>
+      <div class="ab ours"><span>EviCe</span><div class="ab-track"><div class="ab-fill" data-v="13.6"></div></div><b>13.6%</b></div>
+      <p class="ab-cap">Accuracy after deleting the annotated evidence span (items answered correctly with the full video).</p>
+    </div>
+  </div>
+
+  <h3 class="h3 reveal">RelyGen, step by step</h3>
+  <p class="lead small reveal">A real sample through the pipeline, with its actual intermediate outputs.</p>
+  <div class="card stepper reveal" id="kale">
+    <div class="steps-nav" id="kaleNav"></div>
+    <div class="kale-q"><span class="q-tag">Q</span><span id="kaleQ"></span></div>
+    <div class="kale-strip" id="kaleStrip"></div>
+    <svg class="kale-svg" id="kaleSvg" viewBox="0 0 1000 150"></svg>
+    <div class="kale-panel" id="kalePanel"></div>
+    <div class="kale-ctrl"><button id="kalePrev">‹ Prev</button><button id="kalePlay">Play</button><button id="kaleNext">Next ›</button></div>
+  </div>
+
+  <figure class="figure reveal">
+    <img src="static/img/evice_relygen.png" alt="Evidence certification and RelyGen" loading="lazy">
+    <figcaption>(a) Evidence certification. (b) Certifying TGR training data improves ReGAP, but 2k certified samples are too few for localization and accuracy,
+      while VideoQA data is abundant but lacks spans. (c) RelyGen turns VideoQA pairs into candidate spans and certifies them with the same tests.</figcaption>
+  </figure>
+</section>
+
+<section class="section" id="recipe">
+  <h2 class="h2 reveal"><span class="kicker">04</span> A recipe that makes grounding count</h2>
+  <div class="takeaways">
+    <div class="tk card reveal"><div class="tk-n">1</div><h4>SFT couples answering with grounding</h4><p>GRPO without a supervised cold start treats the span as a detached output; its reliance stays far below SFT.</p></div>
+    <div class="tk card reveal"><div class="tk-n">2</div><h4>Reward grounding, not answers</h4><p>From the same SFT checkpoint, GRPO with R<sub>IoU</sub> raises reliance throughout training; R<sub>ans</sub> also rewards right answers with wrong spans and erodes it.</p></div>
+    <div class="tk card reveal"><div class="tk-n">3</div><h4>Same story for agents</h4><p>Multi-turn tool-calling models behave the same way: with R<sub>IoU</sub> their reliance is close to the single-turn model.</p></div>
+  </div>
+  <figure class="figure reveal">
+    <img src="static/img/training_recipe.png" alt="Effect of the training recipe" loading="lazy">
+    <figcaption>(a) Accuracy and ReGAP on Video-Oasis. (b) Training dynamics under R<sub>IoU</sub> or R<sub>ans</sub>. (c) ReGAP on ReliaNeedle when the predicted span hits or misses the evidence.</figcaption>
+  </figure>
+
+  <h3 class="h3 reveal">Grounding helps only when the answer relies on it</h3>
+  <p class="lead small reveal">On ReliaNeedle items where the predicted span misses the evidence, replace it with the ground-truth span and let the model continue.</p>
+  <div class="card fix reveal" id="fixBars">
+    <div class="fx-col"><h5>Single-turn</h5>
+      <div class="fb"><span>SFT + GRPO (ours)</span><div class="fb-track"><div class="fb-fill ours" data-v="22.6"></div></div><b>+22.6</b></div>
+      <div class="fb"><span>GRPO w/o cold start</span><div class="fb-track"><div class="fb-fill" data-v="5.6"></div></div><b>+5.6</b></div>
+      <div class="fb"><span>Video-Thinker</span><div class="fb-track"><div class="fb-fill" data-v="1.6"></div></div><b>+1.6</b></div>
+    </div>
+    <div class="fx-col"><h5>Multi-turn</h5>
+      <div class="fb"><span>SFT + GRPO (ours)</span><div class="fb-track"><div class="fb-fill ours" data-v="21.4"></div></div><b>+21.4</b></div>
+      <div class="fb"><span>GRPO w/o cold start</span><div class="fb-track"><div class="fb-fill" data-v="10.7"></div></div><b>+10.7</b></div>
+      <div class="fb"><span>Video-o3</span><div class="fb-track"><div class="fb-fill" data-v="3.4"></div></div><b>+3.4</b></div>
+    </div>
+    <p class="note">Accuracy gain (points) from correcting the span. Scaling pure grounding data during GRPO likewise lifts accuracy from 34.7% to 36.8% only
+      for SFT + GRPO (ReGAP stays 0.44–0.46); without the cold start there is no gain and ReGAP drops from 0.15 to 0.11.</p>
+  </div>
+</section>
+
+<section class="section" id="agents">
+  <h2 class="h2 reveal"><span class="kicker">05</span> Agents that look again</h2>
+  <p class="lead reveal">For a multi-turn agent that crops and re-watches the video, we force its first crop off the evidence and let it continue.
+    Our agent goes back to the needle; the official Video-o3 answers from the wrong window.</p>
+  <div class="card agent reveal" id="agentDemo">
+    <div class="agent-q"><span class="q-tag">Q</span><span id="agentQ"></span></div>
+    <svg class="agent-svg" id="agentSvg" viewBox="0 0 1000 220"></svg>
+    <div class="agent-cols">
+      <div class="agent-col">
+        <h5>Forced first crop <span class="c-rand" id="agentForced"></span></h5>
+        <div class="mini-strip" id="agentForcedFrames"></div>
+      </div>
+      <div class="agent-col">
+        <h5>Our agent crops again <span class="c-needle" id="agentRecrop"></span></h5>
+        <div class="mini-strip" id="agentRecropFrames"></div>
+      </div>
+    </div>
+    <div class="agent-out">
+      <div class="ao ours"><b>Ours</b> <code>&lt;think&gt;[51.09, 90.96], [91.07, 131.05]&lt;/think&gt;&lt;answer&gt;A&lt;/answer&gt;</code> <span class="ok">✓ The clothes</span></div>
+      <div class="ao"><b>Video-o3</b> <i id="agentQuote"></i> <span class="bad">✗ answers B</span></div>
+    </div>
+    <button class="replay" id="agentReplay">Replay</button>
+  </div>
+</section>
+
+<section class="section" id="resources">
+  <h2 class="h2 reveal">Resources</h2>
+  <div class="res-grid">
+    <a class="res card reveal" href="https://github.com/shuyansy/TGR-Reliance" target="_blank" rel="noopener"><h4>Code</h4><p>ReGAP, ReliaNeedle and Video-Oasis evaluation, single- and multi-turn training.</p></a>
+    <a class="res card reveal" href="https://huggingface.co/collections/sy1998/when-does-temporal-grounding-help-video-reasoning-6b058ea312ac2e5751e6b735" target="_blank" rel="noopener"><h4>Models</h4><p>Qwen2.5-VL-7B and Qwen3-VL-8B trained with SFT + grounding-only GRPO.</p></a>
+    <a class="res card reveal" href="https://huggingface.co/datasets/sy1998/EviCe" target="_blank" rel="noopener"><h4>EviCe</h4><p>20,624 evidence-certified samples over 17,321 videos.</p></a>
+    <a class="res card reveal" href="https://huggingface.co/datasets/sy1998/ReliaNeedle" target="_blank" rel="noopener"><h4>ReliaNeedle</h4><p>725 needle-in-a-haystack questions with videos.</p></a>
+  </div>
+</section>
+
+<section class="section" id="bibtex">
+  <h2 class="h2 reveal">BibTeX</h2>
+  <div class="card bib reveal">
+    <button class="copy" id="copyBib">Copy</button>
+<pre id="bibText">@article{shu2026when,
+  title={When Does Temporal Grounding Help Video Reasoning?},
+  author={Shu, Yan and De Min, Thomas and D'Inc{\`a}, Moreno and Mancini, Massimiliano and Rota, Paolo},
+  journal={arXiv preprint},
+  year={2026}
+}</pre>
+  </div>
+</section>
+
+<footer class="footer">
+  <p>MHUG, University of Trento &nbsp;·&nbsp; Code under Apache 2.0; ReliaNeedle and EviCe for research use only.</p>
+</footer>
+
+<script src="static/data/page_data.js"></script>
+<script src="static/js/main.js"></script>
+</body>
+</html>
