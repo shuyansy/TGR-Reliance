@@ -29,7 +29,9 @@ share of predicted spans with IoU ≥ 0.3 against the evidence.
 |---|---|---|---|
 | **[Ours, Qwen3-VL-8B](https://huggingface.co/sy1998/TGR-Reliance-Qwen3-VL-8B)** | **1.225** | 64.6 | 75.7 |
 | **[Ours, Qwen2.5-VL-7B](https://huggingface.co/sy1998/TGR-Reliance-Qwen2.5-VL-7B)** | **1.147** | 60.8 | 81.1 |
+| Qwen3-VL-4B | 0.711 | 57.4 | 55.5 |
 | Video-o3 | 0.611 | 67.3 | 64.7 |
+| Qwen2.5-VL-7B | 0.598 | 57.2 | 46.0 |
 | Open-o3-Video-v2 | 0.597 | 65.5 | 77.4 |
 | LOVE-R1 | 0.493 | 58.5 | 67.1 |
 | VisionCoach | 0.468 | 65.8 | 62.3 |
