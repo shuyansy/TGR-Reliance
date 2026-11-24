@@ -1,4 +1,4 @@
-# When Does Temporal Grounding Help Video Reasoning?
+## When Does Temporal Grounding Help Video Reasoning?
 
 <p align="center">
     📃 <a href="" target="_blank">Paper</a> | 🤗 <a href="https://huggingface.co/collections/sy1998/when-does-temporal-grounding-help-video-reasoning-6b058ea312ac2e5751e6b735" target="_blank">Model</a> | 🤗 <a href="https://huggingface.co/datasets/sy1998/EviCe" target="_blank">Training_Data</a> | 📊 <a href="relianeedle/" target="_blank">Benchmark</a>
