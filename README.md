@@ -4,7 +4,7 @@
     📃 <a href="" target="_blank">Paper</a> | 🤗 <a href="" target="_blank">Model</a> | 🤗 <a href="" target="_blank">Training_Data</a> | 📊 <a href="relianeedle/" target="_blank">Benchmark</a>
 </p>
 
-#### [Yan Shu <sup>1</sup>](https://shuyansy.github.io/), [Thomas De Min <sup>1</sup>](https://scholar.google.com/citations?user=fnh_i0cAAAAJ&hl=en), [Moreno D'Incà <sup>1</sup>](https://scholar.google.com/citations?user=tdTJsOMAAAAJ&hl=en), [Massimiliano Mancini <sup>1</sup>](https://mancinimassimiliano.github.io/), and [Paolo Rota <sup>1</sup>](https://paolorota.eu/)
+#### [Yan&nbsp;Shu](https://shuyansy.github.io/)<sup>1</sup>, [Thomas&nbsp;De&nbsp;Min](https://scholar.google.com/citations?user=fnh_i0cAAAAJ&hl=en)<sup>1</sup>, [Moreno&nbsp;D'Incà](https://scholar.google.com/citations?user=tdTJsOMAAAAJ&hl=en)<sup>1</sup>, [Massimiliano&nbsp;Mancini](https://mancinimassimiliano.github.io/)<sup>1</sup>, and [Paolo&nbsp;Rota](https://paolorota.eu/)<sup>1</sup>
 
 <sup>1</sup> MHUG, University of Trento, Italy
 
