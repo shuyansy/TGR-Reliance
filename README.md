@@ -8,32 +8,20 @@
 
 <sup>1</sup> MHUG, University of Trento, Italy
 
-Code and data for the paper *When Does Temporal Grounding Help Video Reasoning?* (under review).
+✨ **Highlights**
 
-Temporally grounded reasoning (TGR) models predict the video span that supports their answer and then answer.
-We ask whether the answer actually **relies** on that span. This repository provides the reliance metric **ReGAP**,
-the controlled benchmark **ReliaNeedle**, the evidence-certified training data **EviCe**, and our training recipes and models.
+**(i) ReGAP, a reliance metric without ground-truth spans.** ReGAP compares the confidence change after deleting the
+predicted span with that after deleting equally long random segments. We validate it on ReliaNeedle, a controlled
+needle-in-a-haystack benchmark whose answers require the evidence inside the annotated span, and find that most temporally grounded
+reasoning (TGR) models rely on their predicted spans less than their pretrained backbones do.
 
-<p align="center">
-  <img src="assets/teaser.png" width="65%" alt="Grounding without reliance">
-</p>
+**(ii) EviCe, evidence-certified training data.** Our pipeline RelyGen annotates VideoQA pairs with correctly located,
+necessary evidence spans, and keeps a sample only if its span is sufficient and necessary for the answer. Training on
+these 20k samples more than doubles ReGAP.
 
-*Grounding without reliance.* (Top) Video-Thinker predicts a span that misses the evidence, yet still outputs the correct
-answer. (Bottom) Accuracy of open-source TGR models on Video-Oasis after deleting each model's predicted span or a random
-span of equal length, on the questions each model answers correctly with the full video.
-
-| Component | Status |
-|---|---|
-| ReGAP metric (`regap/`) | available |
-| Per-item ReliaNeedle results of the 12 models in Table 1 and of our two models (`evaluation/examples/relianeedle/`) | available |
-| ReliaNeedle evaluation for new models (`evaluation/eval_relianeedle.py`) | available |
-| ReliaNeedle annotations (`relianeedle/relianeedle.json`) | available |
-| ReliaNeedle videos | coming soon |
-| EviCe training data (Hugging Face dataset) | link to be added |
-| SFT and GRPO training code, single-turn (`training/`) | available |
-| Multi-turn training code, Video-o3 format (`training/multiturn/`) | available |
-| Model weights, Qwen2.5-VL-7B and Qwen3-VL-8B (SFT + GRPO with the grounding reward) | link to be added |
-| Video-Oasis evaluation, accuracy and ReGAP (`evaluation/oasis/`) | available |
+**(iii) A training recipe that builds reliance.** Supervised fine-tuning on EviCe couples answering with localization,
+and GRPO with a grounding-only reward then improves both reliance and accuracy, whereas rewarding answers erodes reliance.
+Better temporal grounding improves accuracy only for such high-reliance models.
 
 ## ReGAP
 
