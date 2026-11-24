@@ -777,5 +777,121 @@
    "static/img/interv/recrop/ours_recrop_t0116.04s.jpg",
    "static/img/interv/recrop/ours_recrop_t0126.04s.jpg"
   ]
+ },
+ "regap_section": {
+  "id": "Sequence_T2_2365",
+  "duration": 122.92,
+  "needle_span": [
+   1.33,
+   14.29
+  ],
+  "question": "Which object did the person take before they held the book?",
+  "options": [
+   "The food.",
+   "The cup/glass/bottle.",
+   "The box.",
+   "The paper/notebook."
+  ],
+  "answer": "D",
+  "frames": [
+   "static/img/regap2/f00.jpg",
+   "static/img/regap2/f01.jpg",
+   "static/img/regap2/f02.jpg",
+   "static/img/regap2/f03.jpg",
+   "static/img/regap2/f04.jpg",
+   "static/img/regap2/f05.jpg",
+   "static/img/regap2/f06.jpg",
+   "static/img/regap2/f07.jpg",
+   "static/img/regap2/f08.jpg",
+   "static/img/regap2/f09.jpg",
+   "static/img/regap2/f10.jpg",
+   "static/img/regap2/f11.jpg",
+   "static/img/regap2/f12.jpg",
+   "static/img/regap2/f13.jpg",
+   "static/img/regap2/f14.jpg",
+   "static/img/regap2/f15.jpg",
+   "static/img/regap2/f16.jpg",
+   "static/img/regap2/f17.jpg",
+   "static/img/regap2/f18.jpg",
+   "static/img/regap2/f19.jpg",
+   "static/img/regap2/f20.jpg",
+   "static/img/regap2/f21.jpg",
+   "static/img/regap2/f22.jpg",
+   "static/img/regap2/f23.jpg"
+  ],
+  "times": [
+   2.54,
+   7.67,
+   12.79,
+   17.92,
+   23.04,
+   28.17,
+   33.29,
+   38.42,
+   43.54,
+   48.67,
+   53.79,
+   58.92,
+   64.0,
+   69.12,
+   74.25,
+   79.38,
+   84.5,
+   89.62,
+   94.75,
+   99.88,
+   105.0,
+   110.12,
+   115.25,
+   120.38
+  ],
+  "models": {
+   "Open-o3-Video-v2": {
+    "pred_spans": [
+     [
+      0.0,
+      13.504
+     ]
+    ],
+    "p_full": 0.999980963936533,
+    "p_span_deleted": 9.516150271617054e-06,
+    "p_random_deleted": 0.9999841822700631,
+    "correct": true,
+    "regap_all": 0.597,
+    "tau": 9.0106,
+    "c": 18.4205
+   },
+   "VisionCoach": {
+    "pred_spans": [
+     [
+      0.5,
+      20.5
+     ]
+    ],
+    "p_full": 0.9961975181191259,
+    "p_span_deleted": 0.3538974865934165,
+    "p_random_deleted": 0.9939146640826575,
+    "correct": true,
+    "regap_all": 0.468,
+    "tau": 5.022,
+    "c": 5.6977
+   },
+   "Video-Thinker": {
+    "pred_spans": [
+     [
+      4.0,
+      12.0
+     ]
+    ],
+    "p_full": 0.9998465799436235,
+    "p_span_deleted": 0.9999915728015072,
+    "p_random_deleted": 0.9995616939183614,
+    "correct": true,
+    "regap_all": -0.011,
+    "tau": 8.7219,
+    "c": -1.4781
+   }
+  },
+  "clip": 0.0001
  }
 }
