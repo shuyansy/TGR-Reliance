@@ -20,78 +20,49 @@
 
 (iii) **A training recipe**, SFT on EviCe followed by GRPO with a grounding-only reward, that improves both reliance and accuracy. 🍳
 
-## ReGAP
+## ReliaNeedle Leaderboard
 
-For every item the model answers once with the full video $v$. Let $p(\cdot)$ be its probability for its own answer
-(renormalised over the options), $\hat s$ its predicted span and $r_1,\dots,r_K$ random contiguous blocks with the same
-number of frames, placed outside $\hat s$. We delete each of them separately, keep the prompt fixed, and compute
+ReGAP measures how much the answer relies on the predicted span (0 means no more than random frames). R@0.3 is the
+share of predicted spans with IoU ≥ 0.3 against the evidence.
 
-$$c = \operatorname{logit}\Big(\tfrac1K\sum_k p(v\setminus r_k)\Big) - \operatorname{logit}\big(p(v\setminus \hat s)\big),\qquad
-\mathrm{ReGAP} = \frac{\mathbb E[c]}{\tau},\quad \tau = \mathbb E\big[|\operatorname{logit} p(v)|\big].$$
+| Model | ReGAP | Acc. (%) | R@0.3 (%) |
+|---|---|---|---|
+| **[Ours, Qwen3-VL-8B](https://huggingface.co/sy1998/TGR-Reliance-Qwen3-VL-8B)** | **1.225** | 64.6 | 75.7 |
+| **[Ours, Qwen2.5-VL-7B](https://huggingface.co/sy1998/TGR-Reliance-Qwen2.5-VL-7B)** | **1.147** | 60.8 | 81.1 |
+| Qwen3-VL-4B (backbone) | 0.711 | 57.4 | 55.5 |
+| Video-o3 | 0.611 | 67.3 | 64.7 |
+| Qwen2.5-VL-7B (backbone) | 0.598 | 57.2 | 46.0 |
+| Open-o3-Video-v2 | 0.597 | 65.5 | 77.4 |
+| LOVE-R1 | 0.493 | 58.5 | 67.1 |
+| VisionCoach | 0.468 | 65.8 | 62.3 |
+| VideoChat-R1.5 | 0.438 | 61.7 | 47.1 |
+| VideoChat-R1 | 0.375 | 52.6 | 46.8 |
+| Open-o3-Video | 0.271 | 66.8 | 42.9 |
+| Conan | 0.240 | 60.0 | 19.6 |
+| VideoZoomer | 0.195 | 64.3 | 7.7 |
+| Video-Thinker | −0.011 | 54.1 | 17.5 |
 
-ReGAP = 0: the predicted span matters no more than random frames. ReGAP = 1: deleting it typically brings the answer
-probability to about 0.5. Conventions (clipping, refusals, wide spans) are documented in [`regap/metric.py`](regap/metric.py)
-and [`evaluation/utils/deletion.py`](evaluation/utils/deletion.py).
-
-<p align="center">
-  <img src="assets/regap_validation.png" width="75%" alt="Validating ReGAP with controlled spans">
-</p>
-
-*Validating ReGAP with controlled spans on ReliaNeedle.* The predicted span of Qwen2.5-VL-7B is replaced with the
-ground-truth span of length $L$, either (a) shifted in position by $kL$ or (b) scaled in width by $\rho$ around its center.
-
-```python
-import json, regap
-items = [json.loads(l) for l in open("evaluation/examples/relianeedle/qwen2.5-vl-7b.jsonl")]
-print(regap.summarize(items))   # acc, r_at_0.3, regap, regap_hit, regap_miss, ...
-print(regap.bootstrap(items))   # 95% CI with tau re-estimated in every resample
-```
-
-## Reproduce Table 1 (no GPU)
-
-```bash
-python evaluation/compute_regap.py evaluation/examples/relianeedle/*.jsonl
-```
-
-| Model | Acc. | R@0.3 (%) | ReGAP All | Hit | Miss |
-|---|---|---|---|---|---|
-| Qwen2.5-VL-7B | 57.2 | 46.0 | 0.598 | 0.945 | 0.302 |
-| Qwen3-VL-4B | 57.4 | 55.5 | 0.711 | 1.026 | 0.320 |
-| VisionCoach | 65.8 | 62.3 | 0.468 | 0.763 | −0.019 |
-| VideoChat-R1.5 | 61.7 | 47.1 | 0.438 | 0.863 | 0.060 |
-| VideoChat-R1 | 52.6 | 46.8 | 0.375 | 0.709 | 0.081 |
-| Open-o3-Video | 66.8 | 42.9 | 0.271 | 0.764 | −0.100 |
-| Video-Thinker | 54.1 | 17.5 | −0.011 | 0.384 | −0.095 |
-| Video-o3 | 67.3 | 64.7 | 0.611 | 0.700 | 0.448 |
-| LOVE-R1 | 58.5 | 67.1 | 0.493 | 0.628 | 0.218 |
-| Conan | 60.0 | 19.6 | 0.240 | 0.489 | 0.180 |
-| VideoZoomer | 64.3 | 7.7 | 0.195 | 0.693 | 0.153 |
-| Open-o3-Video-v2 | 65.5 | 77.4 | 0.597 | 0.651 | 0.413 |
-| Ours, Qwen2.5-VL-7B (SFT + GRPO, grounding reward) | 60.8 | 81.1 | 1.147 | 1.210 | 0.874 |
-| Ours, Qwen3-VL-8B (SFT + GRPO, grounding reward) | 64.6 | 75.7 | 1.225 | 1.265 | 1.101 |
-
-Each line of the example files is one item: `id`, `gt_span`, `pred_spans`, `correct`, `n_options`, `p_full`,
-`p_span_deleted` (null if the model gave no option letter after the deletion), `p_random_deleted` and `status`.
-The same format is written by the evaluation script below, so you can add your own model to the table.
-
-## Evaluate a model on ReliaNeedle
+### Evaluate on ReliaNeedle
 
 Requirements: Python ≥ 3.10, `vllm==0.11.0`, `transformers==4.57.1`, `torch==2.8.0`, `torchvision`, `decord`, `opencv-python`, `Pillow`, `numpy`.
 
 ```bash
-# backbones of Table 1: 1 fps, at most 64 frames, long side 768 px, time-span prompt, at most 64 new tokens
+# reproduce the leaderboard from the released per-item results (no GPU)
+python evaluation/compute_regap.py evaluation/examples/relianeedle/*.jsonl
+
+# evaluate models
+ANN=relianeedle/relianeedle.json; VID=/path/to/ReliaNeedle
 python evaluation/eval_relianeedle.py --model Qwen/Qwen2.5-VL-7B-Instruct --sampler grid --prompt tga --max_tokens 64 \
-    --annotations relianeedle/relianeedle.json --video_root /path/to/ReliaNeedle --out results/qwen2.5-vl-7b.jsonl
-# our models: official Qwen sampler (1 fps, at most 128 frames), training prompt, at most 256 new tokens
-python evaluation/eval_relianeedle.py --model /path/to/ours-qwen2.5-vl-7b --sampler qwen25 --prompt train --max_tokens 256 \
-    --annotations relianeedle/relianeedle.json --video_root /path/to/ReliaNeedle --out results/ours.jsonl
+    --annotations $ANN --video_root $VID --out results/qwen2.5-vl-7b.jsonl
+python evaluation/eval_relianeedle.py --model sy1998/TGR-Reliance-Qwen2.5-VL-7B --sampler qwen25 --prompt train \
+    --annotations $ANN --video_root $VID --out results/ours-qwen2.5-vl-7b.jsonl
+python evaluation/eval_relianeedle.py --model sy1998/TGR-Reliance-Qwen3-VL-8B --sampler qwen3 --prompt train \
+    --annotations $ANN --video_root $VID --out results/ours-qwen3-vl-8b.jsonl
 python evaluation/compute_regap.py results/*.jsonl
 ```
 
-`--num_shards N --shard_id i` splits the items over GPUs (concatenate the outputs), and `--resume` continues an interrupted run.
-For a new model, pass its prompt with `--system` / `--suffix`. The script expects the predicted span as `[start, end]`
-(seconds) inside `<think></think>` and the option letter inside `<answer></answer>`; for other output formats adapt
-`evaluation/utils/parsing.py` (span and answer parsing, and the position of the answer token whose probabilities are read).
+For other models, set the prompt with `--system` / `--suffix` and adapt the span and answer parsing in
+`evaluation/utils/parsing.py`.
 
 ## Evaluate a model on Video-Oasis
 
