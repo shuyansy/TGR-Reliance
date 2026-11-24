@@ -10,18 +10,11 @@
 
 ✨ **Highlights**
 
-**(i) ReGAP, a reliance metric without ground-truth spans.** ReGAP compares the confidence change after deleting the
-predicted span with that after deleting equally long random segments. We validate it on ReliaNeedle, a controlled
-needle-in-a-haystack benchmark whose answers require the evidence inside the annotated span, and find that most temporally grounded
-reasoning (TGR) models rely on their predicted spans less than their pretrained backbones do.
+(i) **ReGAP**, a metric of how much the answer relies on the predicted span, without ground-truth span annotations.
 
-**(ii) EviCe, evidence-certified training data.** Our pipeline RelyGen annotates VideoQA pairs with correctly located,
-necessary evidence spans, and keeps a sample only if its span is sufficient and necessary for the answer. Training on
-these 20k samples more than doubles ReGAP.
+(ii) **EviCe**, 20k VideoQA samples with certified evidence spans; training on it more than doubles ReGAP.
 
-**(iii) A training recipe that builds reliance.** Supervised fine-tuning on EviCe couples answering with localization,
-and GRPO with a grounding-only reward then improves both reliance and accuracy, whereas rewarding answers erodes reliance.
-Better temporal grounding improves accuracy only for such high-reliance models.
+(iii) **A training recipe**, SFT on EviCe followed by GRPO with a grounding-only reward, that improves both reliance and accuracy.
 
 ## ReGAP
 
