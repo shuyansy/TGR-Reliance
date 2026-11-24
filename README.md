@@ -53,10 +53,6 @@ hf download sy1998/ReliaNeedle --repo-type dataset --local-dir data/ReliaNeedle
 ```
 
 ```bash
-# reproduce the leaderboard from the released per-item results (no GPU)
-python evaluation/compute_regap.py evaluation/examples/relianeedle/*.jsonl
-
-# evaluate models
 ANN=data/ReliaNeedle/relianeedle.json; VID=data/ReliaNeedle
 python evaluation/eval_relianeedle.py --model Qwen/Qwen2.5-VL-7B-Instruct --sampler grid --prompt tga --max_tokens 64 \
     --annotations $ANN --video_root $VID --out results/qwen2.5-vl-7b.jsonl

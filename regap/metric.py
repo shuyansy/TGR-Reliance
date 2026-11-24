@@ -16,7 +16,7 @@ Conventions (identical to the paper's tables):
   * items without a full-video answer or without a predicted span are not measurable (they still count for accuracy);
   * Hit / Miss: union IoU between the predicted spans and the ground-truth span >= 0.3 / < 0.3.
 
-Item format (one dict per item; see evaluation/examples/ for real files):
+Item format (one dict per item, as written by evaluation/eval_relianeedle.py):
     {"id": str, "gt_span": [s, e] | None, "pred_spans": [[s, e], ...], "correct": bool,
      "n_options": int, "p_full": float | None, "p_span_deleted": float | None,
      "p_random_deleted": float | None   (or "p_random_blocks": [float | None, ...]),

@@ -1,4 +1,4 @@
-"""Table 1 columns from per-item result files (output of eval_relianeedle.py, or the files in examples/).
+"""Table 1 columns from per-item result files (output of eval_relianeedle.py).
 
   python evaluation/compute_regap.py results/model_a.jsonl results/model_b.jsonl [--bootstrap 1000]
 Acc. is over all items; R@0.3 and ReGAP (All / Hit / Miss) are over the items where ReGAP is defined (see regap/metric.py).
