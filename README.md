@@ -46,12 +46,18 @@ share of predicted spans with IoU ≥ 0.3 against the evidence.
 
 Requirements: Python ≥ 3.10, `vllm==0.11.0`, `transformers==4.57.1`, `torch==2.8.0`, `torchvision`, `decord`, `opencv-python`, `Pillow`, `numpy`.
 
+Download ReliaNeedle (`relianeedle.json` and `videos/needle/*.mp4`) from Hugging Face:
+
+```bash
+hf download sy1998/ReliaNeedle --repo-type dataset --local-dir data/ReliaNeedle
+```
+
 ```bash
 # reproduce the leaderboard from the released per-item results (no GPU)
 python evaluation/compute_regap.py evaluation/examples/relianeedle/*.jsonl
 
 # evaluate models
-ANN=relianeedle/relianeedle.json; VID=/path/to/ReliaNeedle
+ANN=data/ReliaNeedle/relianeedle.json; VID=data/ReliaNeedle
 python evaluation/eval_relianeedle.py --model Qwen/Qwen2.5-VL-7B-Instruct --sampler grid --prompt tga --max_tokens 64 \
     --annotations $ANN --video_root $VID --out results/qwen2.5-vl-7b.jsonl
 python evaluation/eval_relianeedle.py --model sy1998/TGR-Reliance-Qwen2.5-VL-7B --sampler qwen25 --prompt train \
