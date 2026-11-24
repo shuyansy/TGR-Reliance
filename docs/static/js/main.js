@@ -369,6 +369,18 @@
     $("#agentReplay").addEventListener("click", play);
   })();
 
+  /* ---------------- intro sound toggle ---------------- */
+  (function sound() {
+    var v = document.getElementById("introVideo"), b = document.getElementById("soundBtn"); if (!v || !b) return;
+    var waves = document.getElementById("soundWaves"), lab = document.getElementById("soundLabel");
+    function sync() { var on = !v.muted && v.volume > 0; b.classList.toggle("on", on); lab.textContent = on ? "Sound off" : "Sound on"; waves.setAttribute("opacity", on ? "1" : ".35"); b.setAttribute("aria-label", on ? "Turn sound off" : "Turn sound on"); }
+    b.addEventListener("click", function () {
+      v.muted = !v.muted; if (!v.muted) { v.volume = 0.8; var p = v.play(); if (p && p.catch) p.catch(function () {}); }
+      sync();
+    });
+    v.addEventListener("volumechange", sync); sync();
+  })();
+
   /* ---------------- BibTeX ---------------- */
   var cb = $("#copyBib");
   if (cb) cb.addEventListener("click", function () {
