@@ -100,6 +100,4 @@ single-turn (left) and multi-turn (right) models (*GRPO w/o cold-start* uses `R_
 
 ## License
 
-Code: Apache License 2.0 (see `LICENSE`); `evaluation/utils/vision_process.py` comes from Video-Oasis (MIT) and Qwen
-(Apache-2.0), see `THIRD_PARTY_NOTICES.md`. ReliaNeedle and EviCe are for research use only; the terms of their source
-datasets (Video-MME, Charades / STAR, and the EviCe sources) apply.
+The code is released under the [Apache 2.0 License](LICENSE). ReliaNeedle and EviCe are for research use only.
