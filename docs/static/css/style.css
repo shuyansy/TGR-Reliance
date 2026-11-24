@@ -211,7 +211,7 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; }
 .lg.ours::before { background: linear-gradient(90deg, var(--ours), var(--ours2)); }
 .lg.backbone::before { background: #94a3b8; }
 .lg.tgr::before { background: #f59e0b; }
-table.lb { width: 100%; border-collapse: collapse; font-size: 14.5px; min-width: 680px; }
+table.lb { width: 100%; border-collapse: collapse; font-size: 14.5px; min-width: 560px; }
 .lb th { text-align: left; font-weight: 600; color: var(--muted); padding: 10px 8px; border-bottom: 1px solid var(--card-b); cursor: pointer; user-select: none; white-space: nowrap; }
 .lb th.sorted { color: #fff; }
 .lb td { padding: 9px 8px; border-bottom: 1px solid rgba(255, 255, 255, .04); white-space: nowrap; }

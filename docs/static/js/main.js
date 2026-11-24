@@ -61,7 +61,7 @@
       var r = srcTime(v.currentTime || 0), inside = r.t >= s && r.t <= e;
       head.style.left = (100 * r.t / T) + "%";
       badge.classList.toggle("in", inside);
-      badgeT.textContent = inside ? "Needle · STAR / Charades" : "Haystack · Video-MME";
+      badgeT.textContent = inside ? "Needle" : "Haystack";
       speed.textContent = (r.sp % 1 === 0 ? r.sp.toFixed(0) : r.sp.toFixed(1)) + "×";
       if (correct) correct.classList.toggle("show", r.t > e);
       requestAnimationFrame(tick);
@@ -187,7 +187,6 @@
         var neg = function (v) { return v < 0 ? ' neg' : ''; };
         tr.innerHTML = "<td>" + esc(r.name) + "</td>" +
           '<td><div class="rg"><div class="t"><div class="f" data-w="' + Math.max(0, 100 * r.regap / max) + '"></div></div><span class="v' + neg(r.regap) + '">' + fmt(r.regap, 3) + "</span></div></td>" +
-          '<td class="num' + neg(r.hit) + '">' + fmt(r.hit, 3) + '</td><td class="num' + neg(r.miss) + '">' + fmt(r.miss, 3) + "</td>" +
           '<td class="num">' + fmt(r.acc, 1) + '</td><td class="num">' + fmt(r.r03, 1) + "</td>";
         tb.appendChild(tr);
       });

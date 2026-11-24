@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-  <link rel="stylesheet" href="static/css/style.css?v=20261125e">
+  <link rel="stylesheet" href="static/css/style.css?v=20261125f">
 </head>
 <body>
 
@@ -152,13 +152,13 @@
 
 <section class="section" id="relianeedle">
   <h2 class="h2 reveal"><span class="kicker">02</span> ReliaNeedle: evidence you can't answer without</h2>
-  <p class="lead reveal">725 four-option questions. Each video inserts a real action clip into an unrelated Video-MME video, so the answer lives
-    in a known span and only there. This lets us validate ReGAP and split reliance by whether the predicted span <i>hits</i> or <i>misses</i> the evidence.</p>
+  <p class="lead reveal">725 four-option questions. Each video hides a short real action clip, the <span class="c-needle">needle</span>, inside a longer video,
+    so the answer lives in one known span and only there.</p>
 
   <div class="card ex-card reveal" id="needleExample">
     <div class="hero-video-wrap">
       <video id="heroVideo" src="static/media/hero_needle.mp4" poster="static/media/hero_poster.jpg" muted loop playsinline preload="metadata"></video>
-      <div class="hero-badge" id="heroBadge"><span class="dot"></span><span id="heroBadgeText">Haystack · Video-MME</span></div>
+      <div class="hero-badge" id="heroBadge"><span class="dot"></span><span id="heroBadgeText">Haystack</span></div>
       <div class="hero-speed" id="heroSpeed">10×</div>
     </div>
     <div class="hero-timeline" id="heroTimeline">
@@ -170,30 +170,29 @@
       <span id="heroQuestion"></span>
       <div class="opts" id="heroOptions"></div>
     </div>
-    <p class="hero-cap">One ReliaNeedle item: a short STAR / Charades clip (the <span class="c-needle">needle</span>) is inserted into an unrelated
-      Video-MME video, and only the needle can answer the question. Playback is 10× outside the needle and 2.5× inside.</p>
+    <p class="hero-cap">One ReliaNeedle item: only the <span class="c-needle">needle</span> can answer the question. Playback is 10× outside the needle and 2.5× inside.</p>
   </div>
 
   <div class="card build reveal" id="needleBuild">
-    <div class="build-row"><span class="row-lbl">Haystack <small>Video-MME</small></span><div class="row-frames" id="buildHay"></div></div>
+    <div class="build-row"><span class="row-lbl">Haystack</span><div class="row-frames" id="buildHay"></div></div>
     <div class="build-row"><span class="row-lbl c-needle">Needle <small>STAR / Charades</small></span><div class="row-frames needle-row" id="buildNeedle"></div></div>
     <div class="build-row"><span class="row-lbl">ReliaNeedle video</span><div class="row-frames merged" id="buildMerged"></div></div>
     <button class="replay" id="buildReplay">Replay</button>
   </div>
 
   <h3 class="h3 reveal">Leaderboard</h3>
-  <p class="lead small reveal">Hit / Miss: ReGAP on items where the predicted span overlaps the evidence (IoU ≥ 0.3) or not. Click a column to sort.</p>
+  <p class="lead small reveal">Click a column to sort.</p>
   <div class="card table-card reveal">
     <div class="legend"><span class="lg ours">Ours (SFT + GRPO, grounding reward)</span><span class="lg backbone">Backbone</span><span class="lg tgr">Existing TGR model</span></div>
     <table class="lb" id="leaderboard">
       <thead><tr>
-        <th data-k="name">Model</th><th data-k="regap" class="sorted">ReGAP ▾</th><th data-k="hit">Hit</th><th data-k="miss">Miss</th><th data-k="acc">Acc. (%)</th><th data-k="r03">R@0.3 (%)</th>
+        <th data-k="name">Model</th><th data-k="regap" class="sorted">ReGAP ▾</th><th data-k="acc">Acc. (%)</th><th data-k="r03">R@0.3 (%)</th>
       </tr></thead>
       <tbody></tbody>
     </table>
   </div>
   <div class="callout reveal"><b>Grounding without reliance.</b> Nine of ten TGR models rely on their predicted span less than their own backbone,
-    and even when their span is correct (Hit), deleting it often leaves the answer unchanged. On standard benchmarks, models keep about 90% of their
+    and even when their span is correct, deleting it often leaves the answer unchanged. On standard benchmarks, models keep about 90% of their
     accuracy after the annotated evidence is deleted, so these benchmarks cannot reveal it.</div>
 </section>
 
@@ -318,7 +317,7 @@
 </footer>
 
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-<script defer src="static/data/page_data.js?v=20261125e"></script>
-<script defer src="static/js/main.js?v=20261125e"></script>
+<script defer src="static/data/page_data.js?v=20261125f"></script>
+<script defer src="static/js/main.js?v=20261125f"></script>
 </body>
 </html>
