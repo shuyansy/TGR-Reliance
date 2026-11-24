@@ -6,7 +6,7 @@
 
 #### [Yan&nbsp;Shu](https://shuyansy.github.io/), [Thomas&nbsp;De&nbsp;Min](https://scholar.google.com/citations?user=fnh_i0cAAAAJ&hl=en), [Moreno&nbsp;D'Incà](https://scholar.google.com/citations?user=tdTJsOMAAAAJ&hl=en), [Massimiliano&nbsp;Mancini](https://mancinimassimiliano.github.io/), and [Paolo&nbsp;Rota](https://paolorota.eu/)
 
-<p align="center"><b>MHUG, University of Trento, Italy</b></p>
+<p align="center"><img src="assets/mhug_logo.png" height="30" align="absmiddle" alt="MHUG logo">&nbsp;<b>MHUG, University of Trento, Italy</b></p>
 
 ✨ **Highlights**
 
