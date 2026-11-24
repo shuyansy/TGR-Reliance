@@ -98,6 +98,8 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; }
 .hero-badge.in { color: var(--needle); box-shadow: 0 0 0 1px rgba(52, 211, 153, .5); }
 .hero-speed { position: absolute; top: 14px; right: 14px; padding: 6px 12px; border-radius: 999px; background: rgba(0, 0, 0, .55); font: 600 13px "JetBrains Mono", monospace; }
 .hero-timeline { margin: 16px 4px 6px; }
+.ex-card { margin-bottom: 18px; max-width: 920px; }
+.ex-card .hero-video-wrap { border-radius: 12px; }
 .tl-track { position: relative; height: 14px; background: rgba(255, 255, 255, .08); border-radius: 999px; }
 .tl-needle {
   position: absolute; top: -3px; bottom: -3px; background: linear-gradient(90deg, rgba(52, 211, 153, .55), rgba(52, 211, 153, .9));

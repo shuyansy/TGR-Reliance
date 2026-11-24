@@ -67,7 +67,10 @@
       requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
-    var p = v.play && v.play(); if (p && p.catch) p.catch(function () {});
+    // the example plays when it scrolls into view and pauses when it leaves
+    var vio = new IntersectionObserver(function (es) { es.forEach(function (en) { if (en.isIntersecting) { var p = v.play(); if (p && p.catch) p.catch(function () {}); } else v.pause(); }); }, { threshold: 0.3 });
+    vio.observe(v);
+    var iv = document.getElementById("introVideo"); if (iv) { var q = iv.play && iv.play(); if (q && q.catch) q.catch(function () {}); }
   })();
 
   /* ---------------- ReGAP demo ---------------- */

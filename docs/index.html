@@ -51,21 +51,9 @@
 
     <div class="hero-card reveal">
       <div class="hero-video-wrap">
-        <video id="heroVideo" src="static/media/hero_needle.mp4" poster="static/media/hero_poster.jpg" autoplay muted loop playsinline></video>
-        <div class="hero-badge" id="heroBadge"><span class="dot"></span><span id="heroBadgeText">Haystack · Video-MME</span></div>
-        <div class="hero-speed" id="heroSpeed">10×</div>
+        <video id="introVideo" src="static/media/intro.mp4" poster="static/media/intro_poster.jpg" autoplay muted loop playsinline controls preload="auto"></video>
       </div>
-      <div class="hero-timeline" id="heroTimeline">
-        <div class="tl-track"><div class="tl-needle" id="heroNeedle"><span>needle</span></div><div class="tl-head" id="heroHead"></div></div>
-        <div class="tl-ticks" id="heroTicks"></div>
-      </div>
-      <div class="hero-q">
-        <span class="q-tag">Q</span>
-        <span id="heroQuestion"></span>
-        <div class="opts" id="heroOptions"></div>
-      </div>
-      <p class="hero-cap">A <b>ReliaNeedle</b> item: a short STAR / Charades clip (the <span class="c-needle">needle</span>) is inserted into an unrelated
-        Video-MME video. Only the needle can answer the question. Playback is 10× outside the needle and 2.5× inside.</p>
+      <p class="hero-cap">A one-minute overview of the paper.</p>
     </div>
 
     <p class="tldr reveal"><b>TL;DR</b> Temporally grounded reasoning models point at the right moment, but their answers often do not depend on it.
@@ -146,6 +134,25 @@
   <h2 class="h2 reveal"><span class="kicker">02</span> ReliaNeedle: evidence you can't answer without</h2>
   <p class="lead reveal">725 four-option questions. Each video inserts a real action clip into an unrelated Video-MME video, so the answer lives
     in a known span and only there. This lets us validate ReGAP and split reliance by whether the predicted span <i>hits</i> or <i>misses</i> the evidence.</p>
+
+  <div class="card ex-card reveal" id="needleExample">
+    <div class="hero-video-wrap">
+      <video id="heroVideo" src="static/media/hero_needle.mp4" poster="static/media/hero_poster.jpg" muted loop playsinline preload="metadata"></video>
+      <div class="hero-badge" id="heroBadge"><span class="dot"></span><span id="heroBadgeText">Haystack · Video-MME</span></div>
+      <div class="hero-speed" id="heroSpeed">10×</div>
+    </div>
+    <div class="hero-timeline" id="heroTimeline">
+      <div class="tl-track"><div class="tl-needle" id="heroNeedle"><span>needle</span></div><div class="tl-head" id="heroHead"></div></div>
+      <div class="tl-ticks" id="heroTicks"></div>
+    </div>
+    <div class="hero-q">
+      <span class="q-tag">Q</span>
+      <span id="heroQuestion"></span>
+      <div class="opts" id="heroOptions"></div>
+    </div>
+    <p class="hero-cap">One ReliaNeedle item: a short STAR / Charades clip (the <span class="c-needle">needle</span>) is inserted into an unrelated
+      Video-MME video, and only the needle can answer the question. Playback is 10× outside the needle and 2.5× inside.</p>
+  </div>
 
   <div class="card build reveal" id="needleBuild">
     <div class="build-row"><span class="row-lbl">Haystack <small>Video-MME</small></span><div class="row-frames" id="buildHay"></div></div>
