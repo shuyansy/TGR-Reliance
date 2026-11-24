@@ -14,7 +14,7 @@
   <img src="assets/highlights.png" width="100%" alt="Highlights: ReGAP, EviCe and the training recipe">
 </p>
 
-(i) **ReGAP**, a reliance metric that needs no ground-truth spans. 🔍
+(i) **ReGAP**, measuring how much a model's answer relies on its predicted span. 🔍
 
 (ii) **EviCe**, 20k evidence-certified VideoQA samples that more than double ReGAP. 🏅
 
