@@ -47,7 +47,7 @@ share of predicted spans with IoU ≥ 0.3 against the evidence.
 
 Requirements: Python ≥ 3.10, `vllm==0.11.0`, `transformers==4.57.1`, `torch==2.8.0`, `torchvision`, `decord`, `opencv-python`, `Pillow`, `numpy`.
 
-Download ReliaNeedle (`relianeedle.json` and `videos/needle/*.mp4`) from Hugging Face:
+Download ReliaNeedle (`relianeedle.json` and `videos/relianeedle_*.mp4`) from Hugging Face:
 
 ```bash
 hf download sy1998/ReliaNeedle --repo-type dataset --local-dir data/ReliaNeedle
