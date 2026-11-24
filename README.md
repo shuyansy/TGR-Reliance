@@ -10,6 +10,10 @@
 
 ✨ **Highlights**
 
+<p align="center">
+  <img src="assets/highlights.png" width="100%" alt="Highlights: ReGAP, EviCe and the training recipe">
+</p>
+
 (i) **ReGAP**, a metric of how much the answer relies on the predicted span, without ground-truth span annotations. 🔍
 
 (ii) **EviCe**, 20k VideoQA samples with certified evidence spans; training on it more than doubles ReGAP. 🏅
