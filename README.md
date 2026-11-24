@@ -66,11 +66,13 @@ python evaluation/compute_regap.py results/*.jsonl
 For other models, set the prompt with `--system` / `--suffix` and adapt the span and answer parsing in
 `evaluation/utils/parsing.py`.
 
-## Training
+## Training Dataset
 
-See [`training/README.md`](training/README.md): SFT on EviCe with LLaMA-Factory, then GRPO with verl rewarded only for
-temporal grounding (`R_IoU`), for Qwen2.5-VL-7B and Qwen3-VL-8B; the same recipe in the multi-turn (tool-calling) format
-on top of Video-o3 in [`training/multiturn/`](training/multiturn/README.md).
+EviCe contains 20k VideoQA samples whose evidence spans are certified by RelyGen to be sufficient and necessary for the answer.
+
+```bash
+hf download sy1998/EviCe --repo-type dataset --local-dir data/EviCe
+```
 
 <p align="center">
   <img src="assets/evice_relygen.png" width="100%" alt="Evidence certification and RelyGen">
@@ -80,6 +82,12 @@ on top of Video-o3 in [`training/multiturn/`](training/multiturn/README.md).
 fail when the span is deleted. (b) Certifying TGR training data improves ReGAP, but the 2k certified samples are too few
 to improve localization and accuracy, while VideoQA data is abundant but lacks evidence spans. (c) RelyGen turns VideoQA
 pairs without span annotations into candidate spans and certifies them with the same tests to build EviCe.
+
+## Training
+
+SFT on EviCe with LLaMA-Factory, then GRPO with verl rewarded only for temporal grounding (`R_IoU`), for Qwen2.5-VL-7B
+and Qwen3-VL-8B. Commands and settings are in [`training/README.md`](training/README.md), and the multi-turn
+(tool-calling) version on top of Video-o3 is in [`training/multiturn/`](training/multiturn/README.md).
 
 <p align="center">
   <img src="assets/training_recipe.png" width="100%" alt="Effect of the training recipe">
