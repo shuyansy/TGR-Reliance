@@ -20,8 +20,8 @@ deepspeed: examples/deepspeed/ds_z3_config.json
 
 ### dataset
 dataset: evice
-dataset_dir: data                 # holds dataset_info.json and evice.json
-media_dir: /path/to/evice_videos  # root with LLaVA-Video-178K/, TimeLens-100K/, Charades/, ... (see the EviCe dataset card)
+dataset_dir: data                 # holds dataset_info.json and EviCe.json
+media_dir: /path/to/EviCe         # the downloaded EviCe folder; EviCe.json refers to videos/evice_XXXXX.mp4 in it
 template: qwen2_vl
 cutoff_len: 51200                 # 128 frames x <= 602,112 px -> <= 49,152 visual tokens + text
 max_samples: 40000

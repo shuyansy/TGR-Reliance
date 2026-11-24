@@ -26,7 +26,7 @@ e.g. `max_steps` in the yaml) and keep the questions used for GRPO out of the SF
 ## 2. GRPO
 
 ```bash
-python training/grpo/build_grpo_data.py --evice evice.json --media_dir /path/to/evice_videos --family qwen25 --out_dir data/grpo_qwen25
+python training/grpo/build_grpo_data.py --evice /path/to/EviCe/EviCe.json --media_dir /path/to/EviCe --family qwen25 --out_dir data/grpo_qwen25
 cd verl   # patched, see grpo/run_grpo.sh
 FAMILY=qwen25 INIT_MODEL=/path/to/sft_checkpoint DATA=data/grpo_qwen25 OUT=outputs/grpo_qwen25 \
     REWARD=compute_score_iou bash /path/to/TGR-Reliance/training/grpo/run_grpo.sh

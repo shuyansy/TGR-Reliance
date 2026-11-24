@@ -39,7 +39,7 @@ patch -p1 -d $(python -c "import transformers, os; print(os.path.dirname(transfo
 
 ## Data
 
-All data are built from EviCe (`evice.json` and the source videos, see the EviCe dataset card).
+All data are built from EviCe (`EviCe.json` and the `videos/` folder of the EviCe dataset).
 
 **SFT.** `tools/build_sft_data.py` rewrites every EviCe sample (video, question, evidence spans, answer) as a tool-use dialogue, with the
 prompts of Video-o3 (read from `RL/verl/utils/dataset/task_prompt.py`, so SFT, RL and evaluation use the same text):
@@ -60,7 +60,7 @@ spans (`--think spans`, default). For Qwen3-VL (`--family qwen3`) the options ke
 evaluation; `--family qwen25` reproduces the data of our Qwen2.5-VL model, whose options were written without letters.
 
 ```bash
-python tools/build_sft_data.py data/evice_multiturn_qwen25.json --evice evice.json --media_dir /path/to/evice_videos \
+python tools/build_sft_data.py data/evice_multiturn_qwen25.json --evice /path/to/EviCe/EviCe.json --media_dir /path/to/EviCe \
     --video_o3 /path/to/Video-o3 --family qwen25 --check_duration [--ids sft_ids.txt | --n 4800 --seed 0]
 ```
 
@@ -68,7 +68,7 @@ python tools/build_sft_data.py data/evice_multiturn_qwen25.json --evice evice.js
 as clues). In the paper, SFT and GRPO use disjoint questions (`--exclude` the SFT ids):
 
 ```bash
-python tools/build_rl_data.py data/rl_train.json --evice evice.json --media_dir /path/to/evice_videos \
+python tools/build_rl_data.py data/rl_train.json --evice /path/to/EviCe/EviCe.json --media_dir /path/to/EviCe \
     --exclude sft_ids.txt --val_out data/rl_val.json --val_n 256
 ```
 

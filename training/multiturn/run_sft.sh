@@ -3,7 +3,7 @@
 #
 # One-time setup: patched Video-o3 checkout (see README.md), then from Video-o3/SFT:  pip install -e .  (or rely on PYTHONPATH below).
 # Data (see README.md):
-#   python tools/build_sft_data.py data/evice_multiturn_qwen25.json --evice evice.json --media_dir /path/to/evice_videos \
+#   python tools/build_sft_data.py data/evice_multiturn_qwen25.json --evice /path/to/EviCe/EviCe.json --media_dir /path/to/EviCe \
 #       --video_o3 /path/to/Video-o3 --family qwen25 --check_duration
 #   cp sft/dataset_info.json data/      # the yaml's dataset_dir
 #

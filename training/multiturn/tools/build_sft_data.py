@@ -1,7 +1,7 @@
 """EviCe (single-turn: video + multiple-choice question + "<think>[s, e], ...</think><answer>X</answer>") -> multi-turn SFT data in the
 Video-o3 tool format, for the Video-o3 SFT code (its LLaMA-Factory fork) followed by Video-o3 RL.
 
-  python build_sft_data.py <out.json> --evice evice.json --media_dir <video root> --video_o3 <Video-o3 repo> --family qwen25|qwen3
+  python build_sft_data.py <out.json> --evice EviCe.json --media_dir <EviCe folder> --video_o3 <Video-o3 repo> --family qwen25|qwen3
       [--think spans|template] [--ids ids.txt] [--n N --seed S] [--check_duration --dur_cache cache.json] [--show K]
 
 Each EviCe sample -> one multi-turn sample (only video / question / evidence spans / answer are used, no generated descriptions):
@@ -171,7 +171,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
     ap.add_argument("--evice", required=True)
-    ap.add_argument("--media_dir", required=True, help="root of the EviCe source videos (the 'videos' paths are relative to it)")
+    ap.add_argument("--media_dir", required=True, help="the EviCe folder (the 'videos' paths of EviCe.json are relative to it)")
     ap.add_argument("--video_o3", required=True, help="Video-o3 repository (patched), for RL/verl/utils/dataset/task_prompt.py")
     ap.add_argument("--family", required=True, choices=["qwen25", "qwen3"], help="qwen3: options keep their letter prefix (as in RL / evaluation)")
     ap.add_argument("--think", default="spans", choices=["spans", "template"])

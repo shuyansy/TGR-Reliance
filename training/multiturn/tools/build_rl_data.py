@@ -1,10 +1,10 @@
 """EviCe -> RL data of the Video-o3 RL code (one json list per split).
 
-  python build_rl_data.py <out.json> --evice evice.json --media_dir <video root> [--ids ids.txt] [--n N --seed S]
+  python build_rl_data.py <out.json> --evice EviCe.json --media_dir <EviCe folder> [--ids ids.txt] [--n N --seed S]
       [--exclude ids.txt] [--val_out val.json --val_n N] [--dur_cache cache.json]
 
 Row format (fields of the Video-o3 RL json files):
-  {"doc_id", "video": frame folder relative to BASE_IMAGE_DIR (= the source video path relative to --media_dir, without extension),
+  {"doc_id", "video": frame folder relative to BASE_IMAGE_DIR (= the video path relative to --media_dir without extension, e.g. videos/evice_00001),
    "question", "options": ["A. ...", ...], "solution": {"answer": "C", "clue": [{"timestamp": [s, e], "text": ""}, ...]},
    "duration": seconds or null (filled by finalize_rl_data.py after frame extraction), "data_source": "tool_reward_without_round_penalty",
    "src_video": absolute path of the source video (used by extract_frames_4fps.py; ignored by the RL code)}
@@ -25,7 +25,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
     ap.add_argument("--evice", required=True)
-    ap.add_argument("--media_dir", required=True, help="root of the EviCe source videos (the 'videos' paths are relative to it)")
+    ap.add_argument("--media_dir", required=True, help="the EviCe folder (the 'videos' paths of EviCe.json are relative to it)")
     ap.add_argument("--ids", default=None, help="file with EviCe ids to include (one per line); default all")
     ap.add_argument("--exclude", default=None, help="file with EviCe ids to leave out (e.g. the SFT questions)")
     ap.add_argument("--n", type=int, default=0, help="keep N random questions (with --seed); 0 = all")

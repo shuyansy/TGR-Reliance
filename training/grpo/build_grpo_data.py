@@ -4,7 +4,7 @@ Each row keeps the system prompt and user text of the SFT data verbatim; the vid
 (video path + official sampling parameters), so frames are sampled during rollout exactly as in SFT and evaluation;
 the ground truth (answer letter + evidence spans) is parsed from the SFT target.
 
-  python training/grpo/build_grpo_data.py --evice evice.json --media_dir /path/to/evice_videos --family qwen25 --out_dir data/grpo
+  python training/grpo/build_grpo_data.py --evice /path/to/EviCe/EviCe.json --media_dir /path/to/EviCe --family qwen25 --out_dir data/grpo
   -> data/grpo/train.parquet, data/grpo/val.parquet (--val_size items, random with --seed)
 Use --ids to restrict the training pool to a list of EviCe ids (one per line), e.g. the items not used for SFT.
 """
@@ -23,7 +23,7 @@ OFFICIAL = {   # official lmms-eval Qwen wrapper defaults (max_frames=128 as in 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--evice", required=True)
-    ap.add_argument("--media_dir", required=True)
+    ap.add_argument("--media_dir", required=True, help="the EviCe folder (the 'videos' paths of EviCe.json are relative to it)")
     ap.add_argument("--family", choices=sorted(OFFICIAL), required=True)
     ap.add_argument("--out_dir", required=True)
     ap.add_argument("--val_size", type=int, default=256)

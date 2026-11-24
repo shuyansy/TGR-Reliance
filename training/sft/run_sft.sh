@@ -6,9 +6,9 @@
 #   git checkout 3140c242f0             # the version we used (0.9.4.dev0)
 #   git apply /path/to/TGR-Reliance/training/sft/llamafactory.patch
 #   pip install -e ".[torch,metrics,deepspeed]" transformers==4.57.1 decord
-#   cp /path/to/evice.json data/        # EviCe annotations (Hugging Face dataset card)
+#   cp /path/to/EviCe/EviCe.json data/  # EviCe annotations (see the EviCe dataset card)
 #   merge training/sft/dataset_info.json into data/dataset_info.json
-# and set media_dir in the yaml to the folder that holds the source video datasets.
+# and set media_dir in the yaml to the downloaded EviCe folder (it holds videos/).
 #
 # The patch adds LF_VIDEO_SAMPLING=official_oasis: frames are sampled by the official Qwen2.5-VL / Qwen3-VL sampler
 # (1 fps, at most 128 frames, official resolution), so that training inputs match our evaluation exactly.
