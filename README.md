@@ -81,7 +81,7 @@ hf download sy1998/EviCe --repo-type dataset --local-dir data/EviCe
 *Evidence certification and RelyGen.* (a) A sample is kept only if two judges answer correctly from its span alone and
 fail when the span is deleted. (b) Certifying TGR training data improves ReGAP, but the 2k certified samples are too few
 to improve localization and accuracy, while VideoQA data is abundant but lacks evidence spans. (c) RelyGen turns VideoQA
-pairs without span annotations into candidate spans and certifies them with the same tests to build EviCe.
+pairs without span annotations into candidate spans and certifies them with the same tests to&nbsp;build&nbsp;EviCe.
 
 ## Training
 
@@ -96,7 +96,7 @@ and Qwen3-VL-8B. Commands and settings are in [`training/README.md`](training/RE
 *Effect of the training recipe.* (a) Accuracy and ReGAP on Video-Oasis for single-turn and multi-turn models; labels on
 GRPO variants denote the reward function. (b) Training dynamics on Video-Oasis for single-turn *SFT + GRPO* under
 `R_IoU` or `R_ans`. (c) ReGAP on ReliaNeedle when the predicted span hits (IoU ≥ 0.3) or misses the evidence, for
-single-turn (left) and multi-turn (right) models (*GRPO w/o cold-start* uses `R_ans`; *SFT + GRPO* uses `R_IoU`).
+single-turn (left) and multi-turn (right) models (*GRPO w/o cold-start* uses `R_ans`; *SFT + GRPO*&nbsp;uses&nbsp;`R_IoU`).
 
 ## License
 
