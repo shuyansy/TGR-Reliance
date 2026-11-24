@@ -49,100 +49,6 @@
    "output_resolution": "480x270"
   }
  },
- "regap_demo": {
-  "id": "Sequence_T2_2305",
-  "times": [
-   2.26,
-   6.78,
-   11.29,
-   15.81,
-   20.33,
-   24.85,
-   29.36,
-   33.88,
-   38.4,
-   42.92,
-   47.43,
-   51.95,
-   56.47,
-   60.99,
-   65.5,
-   70.02,
-   74.54,
-   79.06,
-   83.57,
-   88.09,
-   92.61,
-   97.13,
-   101.64,
-   106.16
-  ],
-  "frames": [
-   "static/img/regap/f00.jpg",
-   "static/img/regap/f01.jpg",
-   "static/img/regap/f02.jpg",
-   "static/img/regap/f03.jpg",
-   "static/img/regap/f04.jpg",
-   "static/img/regap/f05.jpg",
-   "static/img/regap/f06.jpg",
-   "static/img/regap/f07.jpg",
-   "static/img/regap/f08.jpg",
-   "static/img/regap/f09.jpg",
-   "static/img/regap/f10.jpg",
-   "static/img/regap/f11.jpg",
-   "static/img/regap/f12.jpg",
-   "static/img/regap/f13.jpg",
-   "static/img/regap/f14.jpg",
-   "static/img/regap/f15.jpg",
-   "static/img/regap/f16.jpg",
-   "static/img/regap/f17.jpg",
-   "static/img/regap/f18.jpg",
-   "static/img/regap/f19.jpg",
-   "static/img/regap/f20.jpg",
-   "static/img/regap/f21.jpg",
-   "static/img/regap/f22.jpg",
-   "static/img/regap/f23.jpg"
-  ],
-  "needle_span": [
-   29.67,
-   48.54
-  ],
-  "duration": 108.42,
-  "question": "Which object did the person sit at before they ate the sandwich?",
-  "options": [
-   "The medicine.",
-   "The table.",
-   "The towel.",
-   "The sofa/couch."
-  ],
-  "answer": "B",
-  "models": {
-   "Ours (Qwen3-VL-8B, SFT + GRPO)": {
-    "pred_spans": [
-     [
-      30.0,
-      48.0
-     ]
-    ],
-    "p_full": 0.9999764999941637,
-    "p_span_deleted": 1.1253517059504427e-07,
-    "p_random_deleted": 0.999989378951272,
-    "correct": true
-   },
-   "LOVE-R1": {
-    "pred_spans": [
-     [
-      32.0,
-      49.0
-     ]
-    ],
-    "p_full": 0.9999516888060554,
-    "p_span_deleted": 0.9999417986826532,
-    "p_random_deleted": 0.9999498132873351,
-    "correct": true
-   }
-  }
- },
  "leaderboard": [
   {
    "name": "Ours, Qwen3-VL-8B",
@@ -366,7 +272,13 @@
      "span_only": "Groot",
      "span_deleted": "Drax"
     }
-   }
+   },
+   "options": [
+    "Gamora",
+    "Rocket",
+    "Groot",
+    "Drax"
+   ]
   },
   {
    "tag": "moto",
@@ -437,7 +349,13 @@
      "span_only": "The beach with crashing waves",
      "span_deleted": "The forest with the parked motorcycle and blue flag"
     }
-   }
+   },
+   "options": [
+    "The forest with the parked motorcycle and blue flag",
+    "The garage with the dog and tools",
+    "The beach with crashing waves",
+    "The rural road with the \"No ride 'n talk\" sign"
+   ]
   }
  ],
  "kale": {
