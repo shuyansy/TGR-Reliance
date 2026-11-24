@@ -22,6 +22,7 @@
 
 ## ReliaNeedle Leaderboard
 
+ReliaNeedle contains 725 needle-in-a-haystack questions whose answers require the evidence inside the annotated span.
 ReGAP measures how much the answer relies on the predicted span (0 means no more than random frames). R@0.3 is the
 share of predicted spans with IoU ≥ 0.3 against the evidence.
 
@@ -51,6 +52,9 @@ Download ReliaNeedle (`relianeedle.json` and `videos/needle/*.mp4`) from Hugging
 ```bash
 hf download sy1998/ReliaNeedle --repo-type dataset --local-dir data/ReliaNeedle
 ```
+
+> [!NOTE]
+> The ReliaNeedle videos will be released once the Video-MME terms are cleared.
 
 ```bash
 ANN=data/ReliaNeedle/relianeedle.json; VID=data/ReliaNeedle
