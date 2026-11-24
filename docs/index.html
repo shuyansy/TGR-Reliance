@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-  <link rel="stylesheet" href="static/css/style.css?v=20261125g">
+  <link rel="stylesheet" href="static/css/style.css?v=20261125h">
 </head>
 <body>
 
@@ -23,7 +23,6 @@
     <a href="#relianeedle">ReliaNeedle</a>
     <a href="#evice">EviCe</a>
     <a href="#recipe">Recipe</a>
-    <a href="#agents">Agents</a>
     <a href="#bibtex">BibTeX</a>
   </div>
   <a class="nav-gh" href="https://github.com/shuyansy/TGR-Reliance" target="_blank" rel="noopener">GitHub</a>
@@ -262,31 +261,6 @@
   </div>
 </section>
 
-<section class="section" id="agents">
-  <h2 class="h2 reveal"><span class="kicker">05</span> Agents that look again</h2>
-  <p class="lead reveal">For a multi-turn agent that crops and re-watches the video, we force its first crop off the evidence and let it continue.
-    Our agent goes back to the needle; the official Video-o3 answers from the wrong window.</p>
-  <div class="card agent reveal" id="agentDemo">
-    <div class="agent-q"><span class="q-tag">Q</span><span id="agentQ"></span></div>
-    <svg class="agent-svg" id="agentSvg" viewBox="0 0 1000 220"></svg>
-    <div class="agent-cols">
-      <div class="agent-col">
-        <h5>Forced first crop <span class="c-rand" id="agentForced"></span></h5>
-        <div class="mini-strip" id="agentForcedFrames"></div>
-      </div>
-      <div class="agent-col">
-        <h5>Our agent crops again <span class="c-needle" id="agentRecrop"></span></h5>
-        <div class="mini-strip" id="agentRecropFrames"></div>
-      </div>
-    </div>
-    <div class="agent-out">
-      <div class="ao ours"><b>Ours</b> <code>&lt;think&gt;[51.09, 90.96], [91.07, 131.05]&lt;/think&gt;&lt;answer&gt;A&lt;/answer&gt;</code> <span class="ok">✓ The clothes</span></div>
-      <div class="ao"><b>Video-o3</b> <i id="agentQuote"></i> <span class="bad">✗ answers B</span></div>
-    </div>
-    <button class="replay" id="agentReplay">Replay</button>
-  </div>
-</section>
-
 <section class="section" id="resources">
   <h2 class="h2 reveal">Resources</h2>
   <div class="res-grid">
@@ -315,7 +289,7 @@
 </footer>
 
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-<script defer src="static/data/page_data.js?v=20261125g"></script>
-<script defer src="static/js/main.js?v=20261125g"></script>
+<script defer src="static/data/page_data.js?v=20261125h"></script>
+<script defer src="static/js/main.js?v=20261125h"></script>
 </body>
 </html>
