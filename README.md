@@ -1,5 +1,10 @@
 # When Does Temporal Grounding Help Video Reasoning?
 
+<p align="center">
+  Yan Shu &nbsp;·&nbsp; Thomas De Min &nbsp;·&nbsp; Moreno D'Incà &nbsp;·&nbsp; Massimiliano Mancini &nbsp;·&nbsp; Paolo Rota<br>
+  MHUG, University of Trento
+</p>
+
 Code and data for the paper *When Does Temporal Grounding Help Video Reasoning?* (under review).
 
 Temporally grounded reasoning (TGR) models predict the video span that supports their answer and then answer.
