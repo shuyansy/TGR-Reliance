@@ -98,15 +98,6 @@ GRPO variants denote the reward function. (b) Training dynamics on Video-Oasis f
 `R_IoU` or `R_ans`. (c) ReGAP on ReliaNeedle when the predicted span hits (IoU ≥ 0.3) or misses the evidence, for
 single-turn (left) and multi-turn (right) models (*GRPO w/o cold-start* uses `R_ans`; *SFT + GRPO* uses `R_IoU`).
 
-<p align="center">
-  <img src="assets/grounding_helps.png" width="100%" alt="Grounding helps only when the answer relies on it">
-</p>
-
-*Grounding helps only when the answer relies on it.* (a, b) Accuracy and ReGAP on Video-Oasis as temporal grounding data
-is added to single-turn GRPO with `R_IoU`. (c, d) Correcting localization at inference on ReliaNeedle. Accuracy on items
-where the predicted spans of all three models in a panel miss the evidence, with the predicted span kept or replaced by a
-random span of the same length or by the ground-truth evidence span (averaged over three runs).
-
 ## License
 
 Code: Apache License 2.0 (see `LICENSE`); `evaluation/utils/vision_process.py` comes from Video-Oasis (MIT) and Qwen
