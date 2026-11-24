@@ -53,9 +53,6 @@ Download ReliaNeedle (`relianeedle.json` and `videos/needle/*.mp4`) from Hugging
 hf download sy1998/ReliaNeedle --repo-type dataset --local-dir data/ReliaNeedle
 ```
 
-> [!NOTE]
-> The ReliaNeedle videos will be released once the Video-MME terms are cleared.
-
 ```bash
 ANN=data/ReliaNeedle/relianeedle.json; VID=data/ReliaNeedle
 python evaluation/eval_relianeedle.py --model Qwen/Qwen2.5-VL-7B-Instruct --sampler grid --prompt tga --max_tokens 64 \
