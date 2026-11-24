@@ -274,24 +274,20 @@
  "relianeedle": {
   "id": "Sequence_T2_2305",
   "before": [
-   "static/img/relianeedle/before/haystack_before_t0003.71s.jpg",
-   "static/img/relianeedle/before/haystack_before_t0011.12s.jpg",
-   "static/img/relianeedle/before/haystack_before_t0018.54s.jpg",
-   "static/img/relianeedle/before/haystack_before_t0025.96s.jpg"
+   "static/img/relianeedle/before/haystack_before_t0006.00s.jpg",
+   "static/img/relianeedle/before/haystack_before_t0015.00s.jpg",
+   "static/img/relianeedle/before/haystack_before_t0024.71s.jpg"
   ],
   "needle": [
-   "static/img/relianeedle/needle/needle_t0031.25s.jpg",
-   "static/img/relianeedle/needle/needle_t0034.38s.jpg",
-   "static/img/relianeedle/needle/needle_t0037.54s.jpg",
-   "static/img/relianeedle/needle/needle_t0040.67s.jpg",
-   "static/img/relianeedle/needle/needle_t0043.83s.jpg",
-   "static/img/relianeedle/needle/needle_t0046.96s.jpg"
+   "static/img/relianeedle/needle/needle_t0032.04s.jpg",
+   "static/img/relianeedle/needle/needle_t0036.75s.jpg",
+   "static/img/relianeedle/needle/needle_t0041.46s.jpg",
+   "static/img/relianeedle/needle/needle_t0046.17s.jpg"
   ],
   "after": [
-   "static/img/relianeedle/after/haystack_after_t0056.00s.jpg",
-   "static/img/relianeedle/after/haystack_after_t0071.00s.jpg",
-   "static/img/relianeedle/after/haystack_after_t0085.96s.jpg",
-   "static/img/relianeedle/after/haystack_after_t0100.96s.jpg"
+   "static/img/relianeedle/after/haystack_after_t0061.00s.jpg",
+   "static/img/relianeedle/after/haystack_after_t0073.50s.jpg",
+   "static/img/relianeedle/after/haystack_after_t0086.00s.jpg"
   ],
   "needle_span": [
    29.67,

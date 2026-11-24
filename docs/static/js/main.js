@@ -159,16 +159,20 @@
   (function build() {
     var N = D.relianeedle; if (!N) return;
     var hay = $("#buildHay"), nd = $("#buildNeedle"), mg = $("#buildMerged");
+    var nb = N.before.length, nn = N.needle.length;
+    // all rows use the merged row's frame width (--fw), so each frame sits above its place in the ReliaNeedle video
+    $("#needleBuild").style.setProperty("--nf", nb + nn + N.after.length);
     var add = function (box, arr, cls) { return arr.map(function (src) { var im = h("img", cls || ""); im.src = src; im.alt = ""; im.loading = "lazy"; box.appendChild(im); return im; }); };
-    add(hay, N.before); var gap = h("span", "", ""); gap.style.width = "24px"; hay.appendChild(gap); add(hay, N.after);
-    var nIms = add(nd, N.needle);
+    add(hay, N.before); var slot = h("span", "slot"); slot.style.width = "calc(var(--fw) * " + nn + " + " + 4 * (nn - 1) + "px)"; hay.appendChild(slot); add(hay, N.after);
+    add(nd, N.needle)[0].style.marginLeft = "calc(var(--fw) * " + nb + " + " + 4 * nb + "px)";
     var mIms = add(mg, N.before).concat(add(mg, N.needle, "n")).concat(add(mg, N.after));
+    // merged frames drop in from their source row: one row up for the needle, two for the haystack
+    mIms.forEach(function (im, i) { im.style.setProperty("--from", i >= nb && i < nb + nn ? "calc(-100% - 14px)" : "calc(-200% - 28px)"); });
     function play() {
-      mIms.forEach(function (im) { im.classList.remove("show"); }); nIms.forEach(function (im) { im.classList.remove("fly"); });
-      var nb = N.before.length, nn = N.needle.length;
+      mIms.forEach(function (im) { im.classList.remove("show"); });
       mIms.forEach(function (im, i) {
         var delay = i < nb ? i * 120 : i < nb + nn ? 700 + (i - nb) * 160 : 1800 + (i - nb - nn) * 120;
-        setTimeout(function () { im.classList.add("show"); if (i >= nb && i < nb + nn) nIms[i - nb].classList.add("fly"); }, 300 + delay);
+        setTimeout(function () { im.classList.add("show"); }, 300 + delay);
       });
     }
     onReveal.needleBuild = play;
